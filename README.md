@@ -78,9 +78,9 @@ Or via the CLI:
 claude mcp add btwb --env BTWB_SESSION_COOKIE="your_cookie_here" -- node /absolute/path/to/btwb-mcp/src/index.js
 ```
 
-## Automatic cookie refresh
+### 5. (Optional) Enable automatic cookie refresh
 
-By default, when your session cookie expires you refresh it by hand (see "Get your session cookie" above). Optionally, you can let the server re-authenticate for you automatically whenever it detects an expired session - every tool call transparently retries once through a fresh login if needed, so you never have to touch DevTools again.
+By default, when your session cookie expires you refresh it by hand (repeat step 2). Optionally, you can let the server re-authenticate for you automatically whenever it detects an expired session - every tool call transparently retries once through a fresh login if needed, so you never have to touch DevTools again. This has been verified working end-to-end (login → fresh cookie → Keychain update → live authenticated request).
 
 This requires storing your actual BTWB **password** (not just a session cookie) in Keychain. Weigh that before opting in - see the caveats below.
 
@@ -90,16 +90,34 @@ This requires storing your actual BTWB **password** (not just a session cookie) 
    security add-generic-password -a "$USER" -s "btwb-password" -A -w
    ```
 
-   This prompts for the password interactively (hidden input, not saved to shell history).
+   `-w` with nothing after it makes `security` prompt for the password on a separate line with hidden input - it's never part of the command itself, so it's never echoed and never saved to shell history. (Prefer a GUI? Keychain Access.app → File → New Password Item → name `btwb-password`, account = your Mac username, works identically.)
 
-2. Set `BTWB_EMAIL` (this one isn't sensitive on its own) alongside your other setup, e.g. in `.env` or exported in your shell, or added to your `.mcp.json`'s `env` block.
+   Note: `-a "$USER"` is just the Keychain lookup key the code uses internally (your Mac account name) - it isn't your BTWB login and doesn't need to match your email.
 
-3. That's it - `refresh_session_cookie` (or any other tool, automatically) will now sign in with those credentials and overwrite the stored session cookie whenever needed.
+2. Set `BTWB_EMAIL` to your BTWB login email (this one isn't sensitive on its own, unlike the password). Since GUI-launched MCP clients don't source your shell profile, the reliable place is your `.mcp.json`'s `env` block, alongside the cookie:
+
+   ```json
+   {
+     "mcpServers": {
+       "btwb": {
+         "command": "node",
+         "args": ["/absolute/path/to/btwb-mcp/src/index.js"],
+         "env": {
+           "BTWB_EMAIL": "you@example.com"
+         }
+       }
+     }
+   }
+   ```
+
+   (`.env` or `export BTWB_EMAIL=...` also work for terminal-launched sessions.)
+
+3. Restart the MCP server. `refresh_session_cookie` (or any other tool, automatically, whenever it detects an expired session) will now sign in with those credentials and overwrite the stored session cookie.
 
 **Caveats:**
 - This stores a second, more sensitive secret (your actual login password) in Keychain, not just a session token.
 - It depends on BTWB's `/signin` → `/session` login form staying script-friendly. If BTWB ever adds a CAPTCHA or 2FA step, automatic refresh will start failing (with a clear error, not silently) and you'll fall back to the manual method.
-- Don't want this? Just skip these steps - everything else works exactly as before, you'll just refresh the cookie by hand when it expires.
+- Don't want this? Just skip this step - everything else works exactly as before, you'll just refresh the cookie by hand when it expires.
 
 ## Privacy
 
