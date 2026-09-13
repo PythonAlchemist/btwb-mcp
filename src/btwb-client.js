@@ -169,3 +169,69 @@ export async function getMovementHistory({ memberId, movementId, movementSlug, d
   }
   return res.json();
 }
+
+function decodeHtmlEntities(str) {
+  return str
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .trim();
+}
+
+// There's no JSON endpoint for a single workout_session (unlike search/log/
+// history) - this scrapes the session's page HTML instead. Built against the
+// "Lifting Complex" (CrossFit Total) page template; other workout types
+// (single-movement, named/benchmark WODs) use the same "Sets" / "Result"
+// section labels as of this writing, but haven't all been tested - if BTWB
+// changes their markup, or a workout type renders differently, the relevant
+// field will just come back null/empty rather than throwing.
+export async function getWorkoutSession(sessionId) {
+  const res = await fetch(`${BASE_URL}/workout_sessions/${sessionId}`, {
+    headers: { Cookie: getCookie() },
+  });
+  if (!res.ok) {
+    throw new Error(`BTWB workout session fetch failed: HTTP ${res.status}`);
+  }
+  const html = await res.text();
+
+  const nameMatch = html.match(
+    /class="h4 fw-semibold text-dark text-uppercase text-decoration-none d-none d-lg-block"[^>]*>([^<]+)<\/a>/
+  );
+  const workoutName = nameMatch ? decodeHtmlEntities(nameMatch[1]) : null;
+
+  const dateMatch = html.match(/mdi-calendar-blank"><\/span>\s*([\d-]+)/);
+  const timeMatch = html.match(/mdi-clock-outline"><\/span>\s*([\d: ]+(?:AM|PM))/);
+  const performedDate = dateMatch ? dateMatch[1].trim() : null;
+  const performedTime = timeMatch ? timeMatch[1].trim() : null;
+
+  const setsMatch = html.match(/<p>Sets\s*([\s\S]*?)<\/p>/);
+  let sets = null;
+  if (setsMatch) {
+    sets = setsMatch[1]
+      .split(/<br\s*\/?>/)
+      .map((line) => decodeHtmlEntities(line.replace(/<[^>]+>/g, "")))
+      .filter(Boolean);
+  }
+
+  const resultMatch = html.match(
+    /Result<\/p>\s*<div class="row[^>]*>\s*<div class="d-inline[^>]*>\s*<span class="text-dark text-decoration-none"[^>]*>\s*([^<]+?)\s*<\/span>/
+  );
+  const result = resultMatch ? decodeHtmlEntities(resultMatch[1]) : null;
+
+  const levelMatch = html.match(/Level (\d+)/);
+  const wodRankMatch = html.match(/(\d+)(?:st|nd|rd|th) WOD/);
+
+  return {
+    sessionId,
+    url: `${BASE_URL}/workout_sessions/${sessionId}`,
+    workoutName,
+    performedDate,
+    performedTime,
+    sets,
+    result,
+    level: levelMatch ? Number(levelMatch[1]) : null,
+    wodRank: wodRankMatch ? Number(wodRankMatch[1]) : null,
+  };
+}

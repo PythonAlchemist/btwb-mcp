@@ -5,7 +5,12 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { searchMovement, logWorkout, getMovementHistory } from "./btwb-client.js";
+import {
+  searchMovement,
+  logWorkout,
+  getMovementHistory,
+  getWorkoutSession,
+} from "./btwb-client.js";
 
 const server = new Server(
   { name: "btwb-mcp", version: "1.0.0" },
@@ -90,6 +95,26 @@ const TOOLS = [
       required: ["memberId", "movementId", "movementSlug"],
     },
   },
+  {
+    name: "get_workout_session",
+    description:
+      "Get the full details of one already-logged BTWB result by its session ID " +
+      "(the number in a beyondthewhiteboard.com/workout_sessions/{id} URL): " +
+      "workout name, performed date/time, the movements/sets, the result/score, " +
+      "and level/WOD-rank stats. There's no search-by-date endpoint yet - you " +
+      "need the session ID already (e.g. from a URL, or from log_workout's " +
+      "redirectedTo field).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: {
+          type: "number",
+          description: "The workout_sessions ID",
+        },
+      },
+      required: ["sessionId"],
+    },
+  },
 ];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
@@ -107,6 +132,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "get_movement_history":
         result = await getMovementHistory(args);
+        break;
+      case "get_workout_session":
+        result = await getWorkoutSession(args.sessionId);
         break;
       default:
         throw new Error(`Unknown tool: ${name}`);
