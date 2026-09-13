@@ -47,6 +47,16 @@ function getCookie() {
         (keychainError ? ` [Keychain error: ${keychainError}]` : "")
     );
   }
+  // Catches an unresolved ${VAR} template landing in the env var literally
+  // (e.g. from an MCP config's env passthrough) instead of being substituted
+  // or omitted - fail loud instead of silently sending garbage as a cookie.
+  if (cookie.includes("${")) {
+    throw new Error(
+      `BTWB_SESSION_COOKIE looks like an unresolved template ("${cookie}"), not a ` +
+        "real cookie value. Remove any env passthrough for it from your MCP config " +
+        "and rely on the Keychain fallback instead."
+    );
+  }
   cachedCookie = cookie;
   return cookie;
 }
