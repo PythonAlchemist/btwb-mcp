@@ -161,9 +161,11 @@ const TOOLS = [
   {
     name: "get_movement_history",
     description:
-      "Get max-over-time history for a movement (PR data points with dates/reps/weight). " +
-      "Requires the BTWB member ID and the movement's numeric ID plus its URL slug " +
-      "(e.g. movementId 35, movementSlug 'deadlift' for beyondthewhiteboard.com/.../35-deadlift).",
+      "Get the full logged history for a movement over a date range - every " +
+      "individual set (date, reps, weight), not just PRs - plus a computed " +
+      "'Potential Max' trend line. Requires the BTWB member ID and the movement's " +
+      "numeric ID plus its URL slug (e.g. movementId 35, movementSlug 'deadlift' " +
+      "for beyondthewhiteboard.com/.../35-deadlift).",
     inputSchema: {
       type: "object",
       properties: {

@@ -1,7 +1,7 @@
 {
   "name": "btwb-mcp",
   "version": "1.0.0",
-  "description": "Unofficial MCP server for Beyond the Whiteboard (BTWB) - search movements, log results, pull PR history",
+  "description": "Unofficial MCP server for Beyond the Whiteboard (BTWB) - search movements, log CrossFit/weightlifting/gymnastics results, and pull your full training history from an LLM",
   "type": "module",
   "main": "src/index.js",
   "bin": {

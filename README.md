@@ -4,7 +4,7 @@
 [![Node.js >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](package.json)
 [![MCP](https://img.shields.io/badge/MCP-server-blue.svg)](https://modelcontextprotocol.io)
 
-An unofficial [MCP](https://modelcontextprotocol.io) server for [Beyond the Whiteboard](https://beyondthewhiteboard.com) (BTWB).
+An unofficial [MCP](https://modelcontextprotocol.io) server that lets an LLM search BTWB's movement library, log CrossFit/weightlifting/gymnastics results, and pull your full training history for [Beyond the Whiteboard](https://beyondthewhiteboard.com) (BTWB) - straight from a chat, no copy-pasting between apps.
 
 BTWB has no public API. This server calls the same internal JSON/form endpoints the BTWB web app itself uses, found by inspecting its network traffic. It authenticates with a copied browser session cookie rather than a real API key.
 
@@ -19,7 +19,7 @@ This project calls BTWB's internal, undocumented endpoints rather than a publish
 - **`search_movement(term)`** - search BTWB's movement library, returns `{id, name, modality, posting_trait}` matches.
 - **`log_workout(movementId, movementName, reps, weight, weightUnit, performedDate, notes)`** - logs a single-movement result (e.g. a 1RM). **Always posts with Privacy: Only Me** - this is hardcoded in `src/btwb-client.js` and is not an exposed parameter, on purpose.
 - **`log_rounds_workout(workoutId, workoutSlug, memberId, sections, totalTimeSeconds, performedDate, rxd, notes, trackEventId)`** - logs a multi-movement "rounds" result (e.g. a For Time WOD with several movements per round). Only "For Time" / total-time scoring is supported. **Always posts with Privacy: Only Me**, same as `log_workout`.
-- **`get_movement_history(memberId, movementId, movementSlug, days)`** - pulls max-over-time history (PR data points with date/reps/weight) for a movement.
+- **`get_movement_history(memberId, movementId, movementSlug, days)`** - pulls the full logged history for a movement over a date range: every individual set (date, reps, weight), not just PRs, plus a computed "Potential Max" trend line.
 - **`get_workout_session(sessionId)`** - fetches details of an already-logged result by its session ID.
 - **`delete_workout_session(sessionId)`** - permanently deletes an already-logged result by its session ID. No undo.
 
