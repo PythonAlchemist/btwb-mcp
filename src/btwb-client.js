@@ -265,6 +265,32 @@ export async function getMovementHistory({ memberId, movementId, movementSlug, d
   return res.json();
 }
 
+// Rails' standard destroy action - the same request its own UJS delete links
+// (data-method="delete") trigger, just issued directly as a real HTTP DELETE
+// instead of simulating the link click.
+export async function deleteWorkoutSession(sessionId) {
+  const csrfToken = await getCsrfToken();
+  const cookie = getCookie();
+
+  const res = await fetch(`${BASE_URL}/workout_sessions/${sessionId}`, {
+    method: "DELETE",
+    headers: {
+      Cookie: cookie,
+      "X-CSRF-Token": csrfToken,
+    },
+    redirect: "manual",
+  });
+
+  if (![200, 204, 302, 303].includes(res.status)) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `BTWB delete_workout_session failed: HTTP ${res.status}. ${text.slice(0, 300)}`
+    );
+  }
+
+  return { success: true, sessionId };
+}
+
 function decodeHtmlEntities(str) {
   return str
     .replace(/&#39;/g, "'")

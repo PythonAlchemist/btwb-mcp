@@ -11,6 +11,7 @@ import {
   logRoundsWorkout,
   getMovementHistory,
   getWorkoutSession,
+  deleteWorkoutSession,
 } from "./btwb-client.js";
 
 const server = new Server(
@@ -201,6 +202,22 @@ const TOOLS = [
       required: ["sessionId"],
     },
   },
+  {
+    name: "delete_workout_session",
+    description:
+      "Permanently delete an already-logged BTWB result by its session ID. " +
+      "This cannot be undone - BTWB has no trash/undo for deleted sessions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: {
+          type: "number",
+          description: "The workout_sessions ID to delete",
+        },
+      },
+      required: ["sessionId"],
+    },
+  },
 ];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
@@ -224,6 +241,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "get_workout_session":
         result = await getWorkoutSession(args.sessionId);
+        break;
+      case "delete_workout_session":
+        result = await deleteWorkoutSession(args.sessionId);
         break;
       default:
         throw new Error(`Unknown tool: ${name}`);

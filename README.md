@@ -13,6 +13,7 @@ BTWB has no public API. This server calls the same internal JSON/form endpoints 
 - **`log_rounds_workout(workoutId, workoutSlug, memberId, sections, totalTimeSeconds, performedDate, rxd, notes, trackEventId)`** - logs a multi-movement "rounds" result (e.g. a For Time WOD with several movements per round). Only "For Time" / total-time scoring is supported. **Always posts with Privacy: Only Me**, same as `log_workout`.
 - **`get_movement_history(memberId, movementId, movementSlug, days)`** - pulls max-over-time history (PR data points with date/reps/weight) for a movement.
 - **`get_workout_session(sessionId)`** - fetches details of an already-logged result by its session ID.
+- **`delete_workout_session(sessionId)`** - permanently deletes an already-logged result by its session ID. No undo.
 
 ## Setup
 
@@ -81,3 +82,4 @@ Documented in commit history / session notes: found by watching Network tab traf
 - Log (multi-movement/rounds): `POST /workouts/{workoutId}-{slug}/workout_sessions` (form-encoded, CSRF-protected, `workout_session[uiobject]` JSON - a different field name and shape than the single-movement flow)
 - History: `GET /members/{memberId}/movements/{movementId}-{slug}/vmax?d={seconds}`
 - Single session detail: `GET /workout_sessions/{id}` (HTML scrape - no JSON endpoint)
+- Delete: `DELETE /workout_sessions/{id}` (CSRF-protected, same endpoint as the app's own "Delete" UJS links)
