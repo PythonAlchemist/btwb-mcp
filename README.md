@@ -1,5 +1,9 @@
 # btwb-mcp
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node.js >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](package.json)
+[![MCP](https://img.shields.io/badge/MCP-server-blue.svg)](https://modelcontextprotocol.io)
+
 An unofficial [MCP](https://modelcontextprotocol.io) server for [Beyond the Whiteboard](https://beyondthewhiteboard.com) (BTWB).
 
 BTWB has no public API. This server calls the same internal JSON/form endpoints the BTWB web app itself uses, found by inspecting its network traffic. It authenticates with a copied browser session cookie rather than a real API key.
