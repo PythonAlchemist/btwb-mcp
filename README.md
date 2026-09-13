@@ -6,6 +6,10 @@ BTWB has no public API. This server calls the same internal JSON/form endpoints 
 
 **This is unofficial and unsupported by BTWB.** It can break if they change their app, and your session cookie will periodically expire and need refreshing. Use it for personal automation only.
 
+## Disclaimer
+
+This project calls BTWB's internal, undocumented endpoints rather than a published API, using your own logged-in session cookie in place of an API key. It isn't affiliated with, endorsed by, or supported by BTWB, LLC. Using it may be subject to BTWB's own Terms of Service - review those and use this at your own discretion and risk. Provided as-is, with no warranty (see [LICENSE](LICENSE)).
+
 ## Tools
 
 - **`search_movement(term)`** - search BTWB's movement library, returns `{id, name, modality, posting_trait}` matches.
@@ -83,3 +87,15 @@ Documented in commit history / session notes: found by watching Network tab traf
 - History: `GET /members/{memberId}/movements/{movementId}-{slug}/vmax?d={seconds}`
 - Single session detail: `GET /workout_sessions/{id}` (HTML scrape - no JSON endpoint)
 - Delete: `DELETE /workout_sessions/{id}` (CSRF-protected, same endpoint as the app's own "Delete" UJS links)
+
+## Contributing
+
+Bug reports and PRs are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md) for how this project is tested (there's no automated test suite) and what to include in a report.
+
+## Security
+
+Found a security issue (e.g. a way this could leak your session cookie)? See [SECURITY.md](SECURITY.md) for how to report it privately.
+
+## License
+
+[MIT](LICENSE)

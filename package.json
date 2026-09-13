@@ -13,6 +13,23 @@
   "engines": {
     "node": ">=18"
   },
+  "license": "MIT",
+  "author": "Jim Chan (https://github.com/jchan023)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jchan023/btwb-mcp.git"
+  },
+  "homepage": "https://github.com/jchan023/btwb-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/jchan023/btwb-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "btwb",
+    "beyond-the-whiteboard",
+    "crossfit"
+  ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4"
   }
