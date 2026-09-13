@@ -8,6 +8,7 @@ import {
 import {
   searchMovement,
   logWorkout,
+  logRoundsWorkout,
   getMovementHistory,
   getWorkoutSession,
 } from "./btwb-client.js";
@@ -72,6 +73,91 @@ const TOOLS = [
     },
   },
   {
+    name: "log_rounds_workout",
+    description:
+      "Log a multi-movement 'rounds' result (e.g. a For Time WOD with several " +
+      "movements per round) to BTWB - as opposed to log_workout, which only " +
+      "handles a single movement. Only 'For Time' workouts scored by total time " +
+      "are supported (other scoring types like AMRAP/total-reps are untested). " +
+      "workoutId/workoutSlug come from the workout's URL " +
+      "(beyondthewhiteboard.com/workouts/{workoutId}-{workoutSlug}/...). " +
+      "Every entry logged through this tool is always posted with Privacy: Only Me - " +
+      "this is hardcoded and cannot be overridden.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workoutId: {
+          type: "number",
+          description: "Numeric workout ID from the workout's URL",
+        },
+        workoutSlug: {
+          type: "string",
+          description: "URL slug from the workout's URL, e.g. 'ft-rows-9x-toes-to-bars-power-cleans-and-wall-balls'",
+        },
+        memberId: {
+          type: "number",
+          description: "BTWB member/profile ID the result is logged under",
+        },
+        sections: {
+          type: "array",
+          description:
+            "Ordered list of round groups making up the workout, e.g. a single " +
+            "buy-in round followed by N rounds of several movements.",
+          items: {
+            type: "object",
+            properties: {
+              rounds: { type: "number", description: "Number of rounds for this section" },
+              movements: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    movementName: { type: "string" },
+                    movementId: { type: "number", description: "Movement ID from search_movement" },
+                    measures: {
+                      type: "object",
+                      description:
+                        "Per-round measures for this movement, keyed by measure type. " +
+                        "Each value is {value, unit}. Common keys: reps ({value, unit:'reps'}), " +
+                        "weight ({value, unit:'lbs'|'kg'}), distance ({value, unit:'m'|'ft'|...}), " +
+                        "height ({value, unit:'ft'|'in'}). Include only the measures that apply " +
+                        "to this movement (e.g. a weighted movement gets both reps and weight).",
+                    },
+                  },
+                  required: ["movementName", "movementId", "measures"],
+                },
+              },
+            },
+            required: ["rounds", "movements"],
+          },
+        },
+        totalTimeSeconds: {
+          type: "number",
+          description: "Total elapsed time in seconds (e.g. hit a 36:00 time cap -> 2160)",
+        },
+        performedDate: {
+          type: "string",
+          description: "Date performed, format YYYY-MM-DD",
+        },
+        rxd: {
+          type: "boolean",
+          description: "true = As Prescribed (Rx'd), false = Modified/scaled",
+        },
+        notes: {
+          type: "string",
+          description: "Optional notes for the entry",
+        },
+        trackEventId: {
+          type: "number",
+          description:
+            "Optional track_event ID to link this result to a scheduled/prescribed " +
+            "WOD (from get_workout_session or the workout's tracks page URL).",
+        },
+      },
+      required: ["workoutId", "workoutSlug", "memberId", "sections", "totalTimeSeconds", "performedDate", "rxd"],
+    },
+  },
+  {
     name: "get_movement_history",
     description:
       "Get max-over-time history for a movement (PR data points with dates/reps/weight). " +
@@ -129,6 +215,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "log_workout":
         result = await logWorkout(args);
+        break;
+      case "log_rounds_workout":
+        result = await logRoundsWorkout(args);
         break;
       case "get_movement_history":
         result = await getMovementHistory(args);

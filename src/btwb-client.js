@@ -158,6 +158,101 @@ export async function logWorkout({
   };
 }
 
+// Logs a multi-movement "rounds" result (e.g. a "For Time" WOD with several
+// movements per round), as opposed to logWorkout's single-movement schema.
+// Reverse-engineered by filling out a real BTWB "Log Result" form for a
+// named/benchmark workout and extracting its actual POST payload - BTWB uses
+// a totally different field name and JSON shape here ("uiobject", execution
+// type "bookends") than the single-movement flow ("definition", execution
+// type "weightlifting/sets"). Only the "For Time" / totalTime-scoring case
+// has been tested; other scoring types (e.g. AMRAP/totalReps) may need a
+// different execution.type/scoring and haven't been verified.
+export async function logRoundsWorkout({
+  workoutId,
+  workoutSlug,
+  memberId,
+  sections,
+  totalTimeSeconds,
+  performedDate,
+  rxd,
+  notes = "",
+  trackEventId,
+}) {
+  const csrfToken = await getCsrfToken();
+  const cookie = getCookie();
+
+  const uiobject = {
+    type: "workoutSession",
+    execution: {
+      type: "bookends",
+      inputs: { time: { value: totalTimeSeconds, unit: "seconds" } },
+      scoring: "totalTime",
+      result: { totalTime: { value: totalTimeSeconds, unit: "seconds" } },
+    },
+    contents: sections.map(({ rounds, movements }) => ({
+      type: "section",
+      rounds,
+      contents: movements.map(({ movementName, movementId, measures }) => ({
+        type: "movement",
+        movementName,
+        movementId,
+        ...measures,
+      })),
+    })),
+  };
+
+  // The form's hidden "performedOn" field carries a human-readable date
+  // alongside session_date - included for parity with what the real form
+  // sends, since it's unclear whether the server actually depends on it.
+  const performedOn = new Date(`${performedDate}T00:00:00`).toLocaleDateString(
+    "en-US",
+    { weekday: "long", month: "long", day: "numeric", year: "numeric" }
+  );
+
+  const body = new URLSearchParams({
+    authenticity_token: csrfToken,
+    "workout_session[uiobject]": JSON.stringify(uiobject),
+    "workout_session[member_id]": String(memberId),
+    "workout_session[rxd]": String(rxd),
+    "workout_session[session_date]": performedDate,
+    performedOn,
+    "workout_session[notes_plain_text]": notes,
+    // Hard rule, not a default: every post through this server is private.
+    // Do not wire a parameter that can override this - see README "Privacy".
+    "workout_session[privacy]": "onlyme",
+  });
+  if (trackEventId) {
+    body.append("track_event_ids[]", String(trackEventId));
+  }
+
+  const res = await fetch(
+    `${BASE_URL}/workouts/${workoutId}-${workoutSlug}/workout_sessions`,
+    {
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRF-Token": csrfToken,
+      },
+      body,
+      redirect: "manual",
+    }
+  );
+
+  if (![302, 303].includes(res.status)) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `BTWB log_rounds_workout failed: HTTP ${res.status}. ${text.slice(0, 300)}`
+    );
+  }
+
+  return {
+    success: true,
+    privacy: "onlyme",
+    redirectedTo: res.headers.get("location"),
+  };
+}
+
 export async function getMovementHistory({ memberId, movementId, movementSlug, days = 365 }) {
   const seconds = Math.round(days * 86400);
   const res = await fetch(

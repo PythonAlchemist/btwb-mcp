@@ -10,7 +10,9 @@ BTWB has no public API. This server calls the same internal JSON/form endpoints 
 
 - **`search_movement(term)`** - search BTWB's movement library, returns `{id, name, modality, posting_trait}` matches.
 - **`log_workout(movementId, movementName, reps, weight, weightUnit, performedDate, notes)`** - logs a single-movement result (e.g. a 1RM). **Always posts with Privacy: Only Me** - this is hardcoded in `src/btwb-client.js` and is not an exposed parameter, on purpose.
+- **`log_rounds_workout(workoutId, workoutSlug, memberId, sections, totalTimeSeconds, performedDate, rxd, notes, trackEventId)`** - logs a multi-movement "rounds" result (e.g. a For Time WOD with several movements per round). Only "For Time" / total-time scoring is supported. **Always posts with Privacy: Only Me**, same as `log_workout`.
 - **`get_movement_history(memberId, movementId, movementSlug, days)`** - pulls max-over-time history (PR data points with date/reps/weight) for a movement.
+- **`get_workout_session(sessionId)`** - fetches details of an already-logged result by its session ID.
 
 ## Setup
 
@@ -75,5 +77,7 @@ Every entry this server logs is posted with **Privacy: Only Me**, hardcoded in t
 Documented in commit history / session notes: found by watching Network tab traffic in a real logged-in browser session while performing each action (searching a movement, submitting the "Log Result" form, viewing a movement's PR page), then reading the resulting request URLs and the log form's actual field names directly out of the page DOM.
 
 - Search: `GET /exercises/autocomplete_name.json?posting_trait=true&term={term}`
-- Log: `POST /workouts/logger` (form-encoded, CSRF-protected)
+- Log (single movement): `POST /workouts/logger` (form-encoded, CSRF-protected, `workout_session[definition]` JSON)
+- Log (multi-movement/rounds): `POST /workouts/{workoutId}-{slug}/workout_sessions` (form-encoded, CSRF-protected, `workout_session[uiobject]` JSON - a different field name and shape than the single-movement flow)
 - History: `GET /members/{memberId}/movements/{movementId}-{slug}/vmax?d={seconds}`
+- Single session detail: `GET /workout_sessions/{id}` (HTML scrape - no JSON endpoint)
