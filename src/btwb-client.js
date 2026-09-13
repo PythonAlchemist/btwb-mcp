@@ -5,20 +5,27 @@
 // and the cookie will need refreshing whenever the session expires.
 
 import { execFileSync } from "node:child_process";
+import { userInfo } from "node:os";
 
 const BASE_URL = "https://beyondthewhiteboard.com";
 const KEYCHAIN_SERVICE = "btwb-session-cookie";
 
 let cachedCookie;
+let keychainError;
 
 function readFromKeychain() {
   try {
+    // process.env.USER is not reliable here - GUI-launched processes (like
+    // the Claude desktop app spawning this server) often don't have it set.
+    // os.userInfo() asks the OS directly instead.
+    const account = userInfo().username;
     return execFileSync(
       "security",
-      ["find-generic-password", "-a", process.env.USER, "-s", KEYCHAIN_SERVICE, "-w"],
+      ["find-generic-password", "-a", account, "-s", KEYCHAIN_SERVICE, "-w"],
       { encoding: "utf8" }
     ).trim();
-  } catch {
+  } catch (err) {
+    keychainError = err.stderr ? err.stderr.toString().trim() : err.message;
     return undefined;
   }
 }
@@ -36,7 +43,8 @@ function getCookie() {
       "No BTWB session cookie found in BTWB_SESSION_COOKIE or in Keychain " +
         `(service: ${KEYCHAIN_SERVICE}). Copy the Cookie header from a logged-in ` +
         "browser request to beyondthewhiteboard.com (DevTools > Network) and " +
-        "store it - see README.md."
+        "store it - see README.md." +
+        (keychainError ? ` [Keychain error: ${keychainError}]` : "")
     );
   }
   cachedCookie = cookie;
