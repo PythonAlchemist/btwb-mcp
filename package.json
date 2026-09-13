@@ -1,0 +1,19 @@
+{
+  "name": "btwb-mcp",
+  "version": "1.0.0",
+  "description": "Unofficial MCP server for Beyond the Whiteboard (BTWB) - search movements, log results, pull PR history",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "btwb-mcp": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  }
+}
