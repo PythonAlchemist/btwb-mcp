@@ -40,28 +40,16 @@ function readFromKeychain() {
 function getCookie() {
   if (cachedCookie) return cachedCookie;
 
-  // Prefer an explicit env var (e.g. set by a terminal-launched session),
-  // but fall back to Keychain directly - GUI-launched apps (like the Claude
-  // desktop app) don't source ~/.zshrc, so an inherited env var can't be
-  // relied on there even though .mcp.json references it.
-  const cookie = process.env.BTWB_SESSION_COOKIE || readFromKeychain();
+  // Keychain is the sole source of truth for the live cookie - refreshSessionCookie()
+  // keeps it current automatically, so there's no env-var override to go stale.
+  const cookie = readFromKeychain();
   if (!cookie) {
     throw new Error(
-      "No BTWB session cookie found in BTWB_SESSION_COOKIE or in Keychain " +
-        `(service: ${KEYCHAIN_SERVICE}). Copy the Cookie header from a logged-in ` +
-        "browser request to beyondthewhiteboard.com (DevTools > Network) and " +
-        "store it - see README.md." +
+      `No BTWB session cookie found in Keychain (service: ${KEYCHAIN_SERVICE}). ` +
+        "Either call refresh_session_cookie (if BTWB_EMAIL + a Keychain password " +
+        "are configured) or copy one manually from DevTools and store it - see " +
+        "README.md." +
         (keychainError ? ` [Keychain error: ${keychainError}]` : "")
-    );
-  }
-  // Catches an unresolved ${VAR} template landing in the env var literally
-  // (e.g. from an MCP config's env passthrough) instead of being substituted
-  // or omitted - fail loud instead of silently sending garbage as a cookie.
-  if (cookie.includes("${")) {
-    throw new Error(
-      `BTWB_SESSION_COOKIE looks like an unresolved template ("${cookie}"), not a ` +
-        "real cookie value. Remove any env passthrough for it from your MCP config " +
-        "and rely on the Keychain fallback instead."
     );
   }
   cachedCookie = cookie;

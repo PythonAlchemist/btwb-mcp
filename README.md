@@ -32,29 +32,21 @@ This project calls BTWB's internal, undocumented endpoints rather than a publish
 npm install
 ```
 
-### 2. Get your session cookie
+### 2. Get your session cookie into Keychain
 
 1. Log into [beyondthewhiteboard.com](https://beyondthewhiteboard.com) in your browser.
 2. Open DevTools → Network tab, reload the page.
 3. Click any request to `beyondthewhiteboard.com`.
 4. Copy the full value of the `Cookie` request header.
+5. Store it directly in Keychain (run this yourself in a terminal - never paste your cookie into a chat/AI session):
 
-This cookie is tied to your login session. If tools start failing with a CSRF/session error, it has expired - repeat these steps for a fresh one.
+   ```bash
+   security add-generic-password -a "$USER" -s "btwb-session-cookie" -A -U -w "your_cookie_here"
+   ```
 
-### 3. Configure the environment variable
+This cookie is tied to your login session. If tools start failing with a CSRF/session error, it has expired - repeat these steps for a fresh one, or set up automatic refresh below so you never have to.
 
-```bash
-cp .env.example .env
-# paste your cookie into .env
-```
-
-Or export it directly:
-
-```bash
-export BTWB_SESSION_COOKIE="your_cookie_here"
-```
-
-### 4. Register with Claude Code
+### 3. Register with Claude Code
 
 Add to your `.mcp.json` (project-level or global):
 
@@ -63,22 +55,19 @@ Add to your `.mcp.json` (project-level or global):
   "mcpServers": {
     "btwb": {
       "command": "node",
-      "args": ["/absolute/path/to/btwb-mcp/src/index.js"],
-      "env": {
-        "BTWB_SESSION_COOKIE": "your_cookie_here"
-      }
+      "args": ["/absolute/path/to/btwb-mcp/src/index.js"]
     }
   }
 }
 ```
 
-Or via the CLI:
+No `env` block needed - the cookie lives in Keychain, not in config. Or via the CLI:
 
 ```bash
-claude mcp add btwb --env BTWB_SESSION_COOKIE="your_cookie_here" -- node /absolute/path/to/btwb-mcp/src/index.js
+claude mcp add btwb -- node /absolute/path/to/btwb-mcp/src/index.js
 ```
 
-### 5. (Optional) Enable automatic cookie refresh
+### 4. (Optional) Enable automatic cookie refresh
 
 By default, when your session cookie expires you refresh it by hand (repeat step 2). Optionally, you can let the server re-authenticate for you automatically whenever it detects an expired session - every tool call transparently retries once through a fresh login if needed, so you never have to touch DevTools again. This has been verified working end-to-end (login → fresh cookie → Keychain update → live authenticated request).
 
