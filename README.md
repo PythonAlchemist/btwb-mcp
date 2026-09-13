@@ -22,6 +22,7 @@ This project calls BTWB's internal, undocumented endpoints rather than a publish
 - **`get_movement_history(memberId, movementId, movementSlug, days)`** - pulls the full logged history for a movement over a date range: every individual set (date, reps, weight), not just PRs, plus a computed "Potential Max" trend line.
 - **`get_workout_session(sessionId)`** - fetches details of an already-logged result by its session ID.
 - **`delete_workout_session(sessionId)`** - permanently deletes an already-logged result by its session ID. No undo.
+- **`refresh_session_cookie()`** - manually re-authenticates and replaces the stored session cookie. Every other tool already does this automatically on an expired session (see "Automatic cookie refresh" below) - this is mainly for testing your setup or forcing an early refresh.
 
 ## Setup
 
@@ -77,6 +78,29 @@ Or via the CLI:
 claude mcp add btwb --env BTWB_SESSION_COOKIE="your_cookie_here" -- node /absolute/path/to/btwb-mcp/src/index.js
 ```
 
+## Automatic cookie refresh
+
+By default, when your session cookie expires you refresh it by hand (see "Get your session cookie" above). Optionally, you can let the server re-authenticate for you automatically whenever it detects an expired session - every tool call transparently retries once through a fresh login if needed, so you never have to touch DevTools again.
+
+This requires storing your actual BTWB **password** (not just a session cookie) in Keychain. Weigh that before opting in - see the caveats below.
+
+1. Store your BTWB password in Keychain (run this yourself in a terminal - never paste your password into a chat/AI session):
+
+   ```bash
+   security add-generic-password -a "$USER" -s "btwb-password" -A -w
+   ```
+
+   This prompts for the password interactively (hidden input, not saved to shell history).
+
+2. Set `BTWB_EMAIL` (this one isn't sensitive on its own) alongside your other setup, e.g. in `.env` or exported in your shell, or added to your `.mcp.json`'s `env` block.
+
+3. That's it - `refresh_session_cookie` (or any other tool, automatically) will now sign in with those credentials and overwrite the stored session cookie whenever needed.
+
+**Caveats:**
+- This stores a second, more sensitive secret (your actual login password) in Keychain, not just a session token.
+- It depends on BTWB's `/signin` → `/session` login form staying script-friendly. If BTWB ever adds a CAPTCHA or 2FA step, automatic refresh will start failing (with a clear error, not silently) and you'll fall back to the manual method.
+- Don't want this? Just skip these steps - everything else works exactly as before, you'll just refresh the cookie by hand when it expires.
+
 ## Privacy
 
 Every entry this server logs is posted with **Privacy: Only Me**, hardcoded in the client, not passed as a parameter. If you ever need a differently-scoped post, do it by hand in the BTWB app rather than changing this server's default.
@@ -91,6 +115,7 @@ Documented in commit history / session notes: found by watching Network tab traf
 - History: `GET /members/{memberId}/movements/{movementId}-{slug}/vmax?d={seconds}`
 - Single session detail: `GET /workout_sessions/{id}` (HTML scrape - no JSON endpoint)
 - Delete: `DELETE /workout_sessions/{id}` (CSRF-protected, same endpoint as the app's own "Delete" UJS links)
+- Sign in (for automatic cookie refresh): `GET /signin` (pre-login session cookie + CSRF token) then `POST /session` (form-encoded: `login`, `password`, `authenticity_token`, `remember_me`)
 
 ## Contributing
 

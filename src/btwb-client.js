@@ -9,11 +9,12 @@ import { userInfo } from "node:os";
 
 const BASE_URL = "https://beyondthewhiteboard.com";
 const KEYCHAIN_SERVICE = "btwb-session-cookie";
+const PASSWORD_KEYCHAIN_SERVICE = "btwb-password";
 
 let cachedCookie;
 let keychainError;
 
-function readFromKeychain() {
+function readSecretFromKeychain(service) {
   try {
     // process.env.USER is not reliable here - GUI-launched processes (like
     // the Claude desktop app spawning this server) often don't have it set.
@@ -21,13 +22,19 @@ function readFromKeychain() {
     const account = userInfo().username;
     return execFileSync(
       "security",
-      ["find-generic-password", "-a", account, "-s", KEYCHAIN_SERVICE, "-w"],
+      ["find-generic-password", "-a", account, "-s", service, "-w"],
       { encoding: "utf8" }
     ).trim();
   } catch (err) {
-    keychainError = err.stderr ? err.stderr.toString().trim() : err.message;
+    if (service === KEYCHAIN_SERVICE) {
+      keychainError = err.stderr ? err.stderr.toString().trim() : err.message;
+    }
     return undefined;
   }
+}
+
+function readFromKeychain() {
+  return readSecretFromKeychain(KEYCHAIN_SERVICE);
 }
 
 function getCookie() {
@@ -61,20 +68,103 @@ function getCookie() {
   return cookie;
 }
 
-async function getCsrfToken() {
+// Logs in with BTWB_EMAIL + a Keychain-stored password and replaces the
+// stored session cookie with a fresh one - the same request beyondthewhiteboard.com's
+// own /signin form makes (GET /signin for a pre-login session cookie + CSRF
+// token, then POST /session with credentials). Optional: only works if both
+// credentials are configured (see README "Automatic cookie refresh"); without
+// them this throws and callers fall back to the "copy a fresh cookie by hand"
+// error path.
+export async function refreshSessionCookie() {
+  const email = process.env.BTWB_EMAIL;
+  const password = readSecretFromKeychain(PASSWORD_KEYCHAIN_SERVICE);
+  if (!email || !password) {
+    throw new Error(
+      "Can't auto-refresh the BTWB session: set BTWB_EMAIL and store your BTWB " +
+        `password in Keychain (service: ${PASSWORD_KEYCHAIN_SERVICE}) - see README ` +
+        '"Automatic cookie refresh". Otherwise copy a fresh Cookie header from your ' +
+        "browser by hand instead."
+    );
+  }
+
+  const signinRes = await fetch(`${BASE_URL}/signin`);
+  const signinCookie = signinRes.headers.get("set-cookie")?.split(";")[0];
+  const signinHtml = await signinRes.text();
+  const tokenMatch = signinHtml.match(/name="authenticity_token" value="([^"]+)"/);
+  if (!tokenMatch) {
+    throw new Error("Could not find a CSRF token on the BTWB sign-in page - it may have changed.");
+  }
+
+  const body = new URLSearchParams({
+    authenticity_token: tokenMatch[1],
+    login: email,
+    password,
+    remember_me: "1",
+    commit: "Sign In",
+  });
+
+  const loginRes = await fetch(`${BASE_URL}/session`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      ...(signinCookie ? { Cookie: signinCookie } : {}),
+    },
+    body,
+    redirect: "manual",
+  });
+
+  if (![302, 303].includes(loginRes.status)) {
+    throw new Error(
+      `BTWB sign-in failed: HTTP ${loginRes.status}. Check BTWB_EMAIL and the ` +
+        `password stored in Keychain (service: ${PASSWORD_KEYCHAIN_SERVICE}) are correct - ` +
+        "this also fails if BTWB ever adds a CAPTCHA/2FA step to sign-in."
+    );
+  }
+
+  const freshCookie = loginRes.headers.get("set-cookie")?.split(";")[0];
+  if (!freshCookie) {
+    throw new Error("BTWB sign-in succeeded but didn't return a new session cookie.");
+  }
+
+  execFileSync("security", [
+    "add-generic-password",
+    "-a", userInfo().username,
+    "-s", KEYCHAIN_SERVICE,
+    "-w", freshCookie,
+    "-A",
+    "-U",
+  ]);
+
+  cachedCookie = freshCookie;
+  return { success: true };
+}
+
+async function fetchWhiteboardHtml() {
   const res = await fetch(`${BASE_URL}/whiteboard`, {
     headers: { Cookie: getCookie() },
   });
   if (!res.ok) {
     throw new Error(`Failed to load page for CSRF token: HTTP ${res.status}`);
   }
-  const html = await res.text();
-  const match = html.match(/<meta name="csrf-token" content="([^"]+)"/);
+  return res.text();
+}
+
+async function getCsrfToken() {
+  let html = await fetchWhiteboardHtml();
+  let match = html.match(/<meta name="csrf-token" content="([^"]+)"/);
   if (!match) {
-    throw new Error(
-      "Could not find a CSRF token on the page - BTWB_SESSION_COOKIE is likely expired. " +
-        "Copy a fresh Cookie header from your browser and try again."
-    );
+    // Missing csrf-token usually means the session cookie has expired and
+    // BTWB served a logged-out page instead - try one automatic re-login
+    // (if configured) before falling back to the manual-copy error.
+    await refreshSessionCookie();
+    html = await fetchWhiteboardHtml();
+    match = html.match(/<meta name="csrf-token" content="([^"]+)"/);
+    if (!match) {
+      throw new Error(
+        "Could not find a CSRF token on the page even after refreshing the session - " +
+          "BTWB's login page may have changed."
+      );
+    }
   }
   return match[1];
 }

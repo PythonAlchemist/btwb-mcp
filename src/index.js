@@ -12,6 +12,7 @@ import {
   getMovementHistory,
   getWorkoutSession,
   deleteWorkoutSession,
+  refreshSessionCookie,
 } from "./btwb-client.js";
 
 const server = new Server(
@@ -220,6 +221,17 @@ const TOOLS = [
       required: ["sessionId"],
     },
   },
+  {
+    name: "refresh_session_cookie",
+    description:
+      "Manually re-authenticate to BTWB and replace the stored session cookie with a " +
+      "fresh one. Every other tool already does this automatically when it detects an " +
+      "expired session, so you normally don't need to call this directly - it's mainly " +
+      "useful to proactively refresh, or to test that BTWB_EMAIL and the Keychain-stored " +
+      "password are set up correctly. Requires BTWB_EMAIL and a password stored in " +
+      "Keychain (service: btwb-password) - see README \"Automatic cookie refresh\".",
+    inputSchema: { type: "object", properties: {} },
+  },
 ];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
@@ -246,6 +258,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "delete_workout_session":
         result = await deleteWorkoutSession(args.sessionId);
+        break;
+      case "refresh_session_cookie":
+        result = await refreshSessionCookie();
         break;
       default:
         throw new Error(`Unknown tool: ${name}`);
