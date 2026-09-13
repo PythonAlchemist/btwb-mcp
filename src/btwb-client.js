@@ -4,17 +4,42 @@
 // cookie rather than a real API key. It can break if BTWB changes their app,
 // and the cookie will need refreshing whenever the session expires.
 
+import { execFileSync } from "node:child_process";
+
 const BASE_URL = "https://beyondthewhiteboard.com";
+const KEYCHAIN_SERVICE = "btwb-session-cookie";
+
+let cachedCookie;
+
+function readFromKeychain() {
+  try {
+    return execFileSync(
+      "security",
+      ["find-generic-password", "-a", process.env.USER, "-s", KEYCHAIN_SERVICE, "-w"],
+      { encoding: "utf8" }
+    ).trim();
+  } catch {
+    return undefined;
+  }
+}
 
 function getCookie() {
-  const cookie = process.env.BTWB_SESSION_COOKIE;
+  if (cachedCookie) return cachedCookie;
+
+  // Prefer an explicit env var (e.g. set by a terminal-launched session),
+  // but fall back to Keychain directly - GUI-launched apps (like the Claude
+  // desktop app) don't source ~/.zshrc, so an inherited env var can't be
+  // relied on there even though .mcp.json references it.
+  const cookie = process.env.BTWB_SESSION_COOKIE || readFromKeychain();
   if (!cookie) {
     throw new Error(
-      "BTWB_SESSION_COOKIE is not set. Copy the Cookie header from a logged-in " +
-        "browser request to beyondthewhiteboard.com (DevTools > Network) and set " +
-        "it as an environment variable. See README.md."
+      "No BTWB session cookie found in BTWB_SESSION_COOKIE or in Keychain " +
+        `(service: ${KEYCHAIN_SERVICE}). Copy the Cookie header from a logged-in ` +
+        "browser request to beyondthewhiteboard.com (DevTools > Network) and " +
+        "store it - see README.md."
     );
   }
+  cachedCookie = cookie;
   return cookie;
 }
 
