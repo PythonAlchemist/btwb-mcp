@@ -227,9 +227,10 @@ const TOOLS = [
       "Manually re-authenticate to BTWB and replace the stored session cookie with a " +
       "fresh one. Every other tool already does this automatically when it detects an " +
       "expired session, so you normally don't need to call this directly - it's mainly " +
-      "useful to proactively refresh, or to test that BTWB_EMAIL and the Keychain-stored " +
-      "password are set up correctly. Requires BTWB_EMAIL and a password stored in " +
-      "Keychain (service: btwb-password) - see README \"Automatic cookie refresh\".",
+      "useful to proactively refresh, or to test that BTWB_EMAIL and the password are " +
+      "set up correctly. Requires BTWB_EMAIL and a password - stored in Keychain " +
+      "(service: btwb-password) on macOS, or the BTWB_PASSWORD env var on hosts without " +
+      "Keychain - see README \"Automatic cookie refresh\".",
     inputSchema: { type: "object", properties: {} },
   },
 ];
