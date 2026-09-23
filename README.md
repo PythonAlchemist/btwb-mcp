@@ -83,6 +83,8 @@ This requires storing your actual BTWB **password** (not just a session cookie) 
 
    Note: `-a "$USER"` is just the Keychain lookup key the code uses internally (your Mac account name) - it isn't your BTWB login and doesn't need to match your email.
 
+   **Running this on a Claude cloud session (Claude Code on the web, a remote/cloud environment) instead of your own Mac?** Those run in a Linux container with no Keychain at all, so `security` can't work there. Set the `BTWB_PASSWORD` env var instead - the server tries Keychain first and falls back to it automatically. Since a password doesn't go stale the way a copied cookie does, this doesn't reintroduce the "stale cookie in an env var" problem Keychain-only storage was chosen to avoid; the cookie itself still only ever lives in memory for that process, never in an env var or on disk.
+
 2. Set `BTWB_EMAIL` to your BTWB login email (this one isn't sensitive on its own, unlike the password). Since GUI-launched MCP clients don't source your shell profile, the reliable place is your `.mcp.json`'s `env` block, alongside the cookie:
 
    ```json
@@ -99,13 +101,14 @@ This requires storing your actual BTWB **password** (not just a session cookie) 
    }
    ```
 
-   (`.env` or `export BTWB_EMAIL=...` also work for terminal-launched sessions.)
+   (`.env` or `export BTWB_EMAIL=...` also work for terminal-launched sessions. On a Claude cloud session, add `BTWB_PASSWORD` as an environment secret rather than committing it to `.mcp.json`.)
 
 3. Restart the MCP server. `refresh_session_cookie` (or any other tool, automatically, whenever it detects an expired session) will now sign in with those credentials and overwrite the stored session cookie.
 
 **Caveats:**
-- This stores a second, more sensitive secret (your actual login password) in Keychain, not just a session token.
+- This stores a second, more sensitive secret (your actual login password) in Keychain (or, on a Claude cloud session, in `BTWB_PASSWORD`), not just a session token.
 - It depends on BTWB's `/signin` → `/session` login form staying script-friendly. If BTWB ever adds a CAPTCHA or 2FA step, automatic refresh will start failing (with a clear error, not silently) and you'll fall back to the manual method.
+- On a Claude cloud session, the refreshed cookie is cached in memory only and re-fetched on every process restart (one extra login) - it can't be persisted the way it is on macOS.
 - Don't want this? Just skip this step - everything else works exactly as before, you'll just refresh the cookie by hand when it expires.
 
 ## Privacy

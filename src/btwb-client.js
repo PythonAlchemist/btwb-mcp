@@ -37,39 +37,58 @@ function readFromKeychain() {
   return readSecretFromKeychain(KEYCHAIN_SERVICE);
 }
 
-function getCookie() {
-  if (cachedCookie) return cachedCookie;
-
-  // Keychain is the sole source of truth for the live cookie - refreshSessionCookie()
-  // keeps it current automatically, so there's no env-var override to go stale.
-  const cookie = readFromKeychain();
-  if (!cookie) {
-    throw new Error(
-      `No BTWB session cookie found in Keychain (service: ${KEYCHAIN_SERVICE}). ` +
-        "Either call refresh_session_cookie (if BTWB_EMAIL + a Keychain password " +
-        "are configured) or copy one manually from DevTools and store it - see " +
-        "README.md." +
-        (keychainError ? ` [Keychain error: ${keychainError}]` : "")
-    );
-  }
-  cachedCookie = cookie;
-  return cookie;
+// Keychain is the preferred source of truth for both the live cookie and the
+// login password - it's what refreshSessionCookie() keeps current automatically
+// on macOS. BTWB_PASSWORD is a fallback for a Claude cloud session (a Linux
+// container with no Keychain): unlike a cookie, a password doesn't go stale,
+// so holding it in an env var doesn't reintroduce the "stale copied cookie"
+// problem the Keychain-only design was chosen to avoid.
+function readPassword() {
+  return readSecretFromKeychain(PASSWORD_KEYCHAIN_SERVICE) || process.env.BTWB_PASSWORD;
 }
 
-// Logs in with BTWB_EMAIL + a Keychain-stored password and replaces the
-// stored session cookie with a fresh one - the same request beyondthewhiteboard.com's
-// own /signin form makes (GET /signin for a pre-login session cookie + CSRF
-// token, then POST /session with credentials). Optional: only works if both
-// credentials are configured (see README "Automatic cookie refresh"); without
-// them this throws and callers fall back to the "copy a fresh cookie by hand"
-// error path.
+async function getCookie() {
+  if (cachedCookie) return cachedCookie;
+
+  const cookie = readFromKeychain();
+  if (cookie) {
+    cachedCookie = cookie;
+    return cachedCookie;
+  }
+
+  // No stored cookie - either nothing's been saved yet, or this host has no
+  // Keychain at all (readFromKeychain() fails the same way either way). If
+  // login credentials are configured, get a fresh cookie automatically
+  // instead of requiring a manual DevTools copy on every restart.
+  if (process.env.BTWB_EMAIL && readPassword()) {
+    await refreshSessionCookie();
+    return cachedCookie;
+  }
+
+  throw new Error(
+    `No BTWB session cookie found in Keychain (service: ${KEYCHAIN_SERVICE}). ` +
+      "Either set BTWB_EMAIL plus a password (Keychain on macOS, or the BTWB_PASSWORD " +
+      "env var on hosts without Keychain) so refresh_session_cookie can log in " +
+      "automatically, or copy one manually from DevTools and store it - see README.md." +
+      (keychainError ? ` [Keychain error: ${keychainError}]` : "")
+  );
+}
+
+// Logs in with BTWB_EMAIL + a password (Keychain on macOS, or BTWB_PASSWORD
+// elsewhere) and replaces the stored session cookie with a fresh one - the
+// same request beyondthewhiteboard.com's own /signin form makes (GET /signin
+// for a pre-login session cookie + CSRF token, then POST /session with
+// credentials). Optional: only works if both credentials are configured (see
+// README "Automatic cookie refresh"); without them this throws and callers
+// fall back to the "copy a fresh cookie by hand" error path.
 export async function refreshSessionCookie() {
   const email = process.env.BTWB_EMAIL;
-  const password = readSecretFromKeychain(PASSWORD_KEYCHAIN_SERVICE);
+  const password = readPassword();
   if (!email || !password) {
     throw new Error(
-      "Can't auto-refresh the BTWB session: set BTWB_EMAIL and store your BTWB " +
-        `password in Keychain (service: ${PASSWORD_KEYCHAIN_SERVICE}) - see README ` +
+      "Can't auto-refresh the BTWB session: set BTWB_EMAIL and a password - store the " +
+        `password in Keychain (service: ${PASSWORD_KEYCHAIN_SERVICE}) on macOS, or set the ` +
+        "BTWB_PASSWORD env var on hosts without Keychain - see README " +
         '"Automatic cookie refresh". Otherwise copy a fresh Cookie header from your ' +
         "browser by hand instead."
     );
@@ -103,8 +122,8 @@ export async function refreshSessionCookie() {
 
   if (![302, 303].includes(loginRes.status)) {
     throw new Error(
-      `BTWB sign-in failed: HTTP ${loginRes.status}. Check BTWB_EMAIL and the ` +
-        `password stored in Keychain (service: ${PASSWORD_KEYCHAIN_SERVICE}) are correct - ` +
+      `BTWB sign-in failed: HTTP ${loginRes.status}. Check BTWB_EMAIL and the password ` +
+        `(Keychain service: ${PASSWORD_KEYCHAIN_SERVICE}, or BTWB_PASSWORD) are correct - ` +
         "this also fails if BTWB ever adds a CAPTCHA/2FA step to sign-in."
     );
   }
@@ -114,14 +133,21 @@ export async function refreshSessionCookie() {
     throw new Error("BTWB sign-in succeeded but didn't return a new session cookie.");
   }
 
-  execFileSync("security", [
-    "add-generic-password",
-    "-a", userInfo().username,
-    "-s", KEYCHAIN_SERVICE,
-    "-w", freshCookie,
-    "-A",
-    "-U",
-  ]);
+  try {
+    execFileSync("security", [
+      "add-generic-password",
+      "-a", userInfo().username,
+      "-s", KEYCHAIN_SERVICE,
+      "-w", freshCookie,
+      "-A",
+      "-U",
+    ]);
+  } catch {
+    // No Keychain on this host (e.g. a Claude cloud session) - the refreshed
+    // cookie still lives in the in-memory cache below for this process's
+    // lifetime, it just isn't persisted across restarts. Expected outside
+    // macOS, not an error.
+  }
 
   cachedCookie = freshCookie;
   return { success: true };
@@ -129,7 +155,7 @@ export async function refreshSessionCookie() {
 
 async function fetchWhiteboardHtml() {
   const res = await fetch(`${BASE_URL}/whiteboard`, {
-    headers: { Cookie: getCookie() },
+    headers: { Cookie: await getCookie() },
   });
   if (!res.ok) {
     throw new Error(`Failed to load page for CSRF token: HTTP ${res.status}`);
@@ -160,7 +186,7 @@ async function getCsrfToken() {
 export async function searchMovement(term) {
   const res = await fetch(
     `${BASE_URL}/exercises/autocomplete_name.json?posting_trait=true&term=${encodeURIComponent(term)}`,
-    { headers: { Cookie: getCookie() } }
+    { headers: { Cookie: await getCookie() } }
   );
   if (!res.ok) {
     throw new Error(`BTWB movement search failed: HTTP ${res.status}`);
@@ -178,7 +204,7 @@ export async function logWorkout({
   notes = "",
 }) {
   const csrfToken = await getCsrfToken();
-  const cookie = getCookie();
+  const cookie = await getCookie();
 
   const definition = {
     type: "workoutSession",
@@ -257,7 +283,7 @@ export async function logRoundsWorkout({
   trackEventId,
 }) {
   const csrfToken = await getCsrfToken();
-  const cookie = getCookie();
+  const cookie = await getCookie();
 
   const uiobject = {
     type: "workoutSession",
@@ -335,7 +361,7 @@ export async function getMovementHistory({ memberId, movementId, movementSlug, d
   const seconds = Math.round(days * 86400);
   const res = await fetch(
     `${BASE_URL}/members/${memberId}/movements/${movementId}-${movementSlug}/vmax?d=${seconds}`,
-    { headers: { Cookie: getCookie() } }
+    { headers: { Cookie: await getCookie() } }
   );
   if (!res.ok) {
     throw new Error(`BTWB movement history fetch failed: HTTP ${res.status}`);
@@ -348,7 +374,7 @@ export async function getMovementHistory({ memberId, movementId, movementSlug, d
 // instead of simulating the link click.
 export async function deleteWorkoutSession(sessionId) {
   const csrfToken = await getCsrfToken();
-  const cookie = getCookie();
+  const cookie = await getCookie();
 
   const res = await fetch(`${BASE_URL}/workout_sessions/${sessionId}`, {
     method: "DELETE",
@@ -388,7 +414,7 @@ function decodeHtmlEntities(str) {
 // field will just come back null/empty rather than throwing.
 export async function getWorkoutSession(sessionId) {
   const res = await fetch(`${BASE_URL}/workout_sessions/${sessionId}`, {
-    headers: { Cookie: getCookie() },
+    headers: { Cookie: await getCookie() },
   });
   if (!res.ok) {
     throw new Error(`BTWB workout session fetch failed: HTTP ${res.status}`);
