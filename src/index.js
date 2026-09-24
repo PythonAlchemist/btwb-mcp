@@ -13,6 +13,7 @@ import {
   getWeighIns,
   getTrackEvents,
   logSetsWorkout,
+  logForTimeWorkout,
   getMovementHistory,
   getMemberId,
   getWorkoutSession,
@@ -274,6 +275,44 @@ const TOOLS = [
     },
   },
   {
+    name: "log_for_time_workout",
+    description:
+      "Log a finished For Time result (with or without a time cap) against that " +
+      "specific prescribed workout - e.g. a class track's chipper - optionally linked " +
+      "to a track event. Movements, reps and distances come from the workout's own " +
+      "prescription; `loads` overrides a movement's load by position for a scaled " +
+      "result (null keeps the prescribed load). Only results finished under the cap " +
+      "are supported. Use get_track_events to find workoutId/workoutSlug/trackEventId. " +
+      "Every entry logged through this tool is always posted with Privacy: Only Me - " +
+      "this is hardcoded and cannot be overridden.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workoutId: { type: "number", description: "Numeric workout ID (from get_track_events or the workout URL)" },
+        workoutSlug: { type: "string", description: "Workout URL slug (from get_track_events or the workout URL)" },
+        totalTimeSeconds: { type: "number", description: "Finish time in seconds (e.g. 13:43 -> 823)" },
+        performedDate: { type: "string", description: "Date performed, format YYYY-MM-DD" },
+        rxd: { type: "boolean", default: true, description: "true = As Prescribed (Rx'd), false = Modified/scaled" },
+        loads: {
+          type: "array",
+          description:
+            "Optional per-item load overrides, aligned with the workout's prescribed " +
+            "items in order; null (or omitted) keeps the prescribed load",
+          items: {
+            type: ["object", "null"],
+            properties: {
+              weight: { type: "number" },
+              weightUnit: { type: "string", enum: ["lbs", "kg"], default: "lbs" },
+            },
+          },
+        },
+        notes: { type: "string", description: "Optional notes for the entry" },
+        trackEventId: { type: "number", description: "Optional track_event ID to link the result to (from get_track_events)" },
+      },
+      required: ["workoutId", "workoutSlug", "totalTimeSeconds", "performedDate"],
+    },
+  },
+  {
     name: "get_movement_history",
     description:
       "Get the full logged history for a movement over a date range - every " +
@@ -388,6 +427,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "log_sets_workout":
         result = await logSetsWorkout(args);
+        break;
+      case "log_for_time_workout":
+        result = await logForTimeWorkout(args);
         break;
       case "get_movement_history":
         result = await getMovementHistory(args);

@@ -467,26 +467,10 @@ export async function getTrackEvents({ date, track } = {}) {
   return { date, events };
 }
 
-// Logs a set-by-set lifting result (e.g. a class track's "Bench Press : 3 @
-// 80%, 3 @ 80%, ... 2 @ 85%" strength piece) against a specific prescribed
-// workout, optionally linked to a track event - unlike logWorkout, which
-// always posts a fresh single-movement "N Rep Max" result. The workout's own
-// "Log Result" page is loaded first for its prescription (the `var uiobject`
-// the BTWB logger is seeded with); each prescribed set keeps its movement,
-// reps and prescribed load (e.g. 80% of 1RM) and gets the actual weight lifted
-// as its input - the same shape BTWB's weightlifting/sets logger posts.
-// Scoring stays "completed" as prescribed; only percentage/pick-load
-// weightlifting/sets workouts have been tested.
-export async function logSetsWorkout({
-  workoutId,
-  workoutSlug,
-  sets,
-  performedDate,
-  rxd = true,
-  notes = "",
-  trackEventId,
-}) {
-  const memberId = await getMemberId();
+// Loads a prescribed workout's own "Log Result" page for its CSRF token and
+// prescription (the `var uiobject` BTWB's logger is seeded with) - the
+// starting point for logging a result against that exact workout.
+async function loadPrescribedWorkout(workoutId, workoutSlug, performedDate) {
   const html = await fetchPageHtml(
     `/workouts/${workoutId}-${workoutSlug}/workout_sessions/new?d=${performedDate}`
   );
@@ -498,38 +482,23 @@ export async function logSetsWorkout({
         "check workoutId/workoutSlug, or BTWB's logger page may have changed."
     );
   }
-  const workout = JSON.parse(prescriptionJson);
-  const prescription = workout.prescription || {};
-  if (prescription.type !== "weightlifting/sets") {
-    throw new Error(
-      `log_sets_workout only handles weightlifting/sets workouts; this one is "${prescription.type}".`
-    );
-  }
-  const prescribedSets = (workout.contents || []).filter((c) => c.type === "movement");
-  if (prescribedSets.length !== sets.length) {
-    throw new Error(
-      `This workout prescribes ${prescribedSets.length} sets but ${sets.length} were given - ` +
-        "pass one {weight} (and optional reps) per prescribed set, in order."
-    );
-  }
+  return { csrfToken, workout: JSON.parse(prescriptionJson) };
+}
 
-  const contents = prescribedSets.map((set, i) => {
-    const { weight, weightUnit = "lbs", reps } = sets[i];
-    const { inputs, ...rest } = set;
-    return {
-      ...rest,
-      ...(reps != null ? { reps: { value: reps, unit: "reps" } } : {}),
-      inputs: { weight: { value: weight, unit: weightUnit } },
-    };
-  });
-
-  const { type, ...executionFields } = prescription;
-  const uiobject = {
-    type: "workoutSession",
-    execution: { type, ...executionFields, scoring: prescription.scoring || "completed" },
-    contents,
-  };
-
+// Posts a workout_session for a prescribed workout - the same form fields
+// BTWB's "Log Result" page submits - optionally linked to a track event.
+async function postPrescribedSession({
+  toolName,
+  workoutId,
+  workoutSlug,
+  csrfToken,
+  uiobject,
+  performedDate,
+  rxd,
+  notes,
+  trackEventId,
+}) {
+  const memberId = await getMemberId();
   const performedOn = new Date(`${performedDate}T00:00:00`).toLocaleDateString(
     "en-US",
     { weekday: "long", month: "long", day: "numeric", year: "numeric" }
@@ -569,7 +538,7 @@ export async function logSetsWorkout({
       .map((m) => m[1])
       .filter((t) => /must|can't|invalid|blank/i.test(t));
     throw new Error(
-      `BTWB log_sets_workout failed: HTTP ${res.status}.` +
+      `BTWB ${toolName} failed: HTTP ${res.status}.` +
         (errors.length ? ` ${errors.join("; ")}` : ` ${text.slice(0, 300)}`)
     );
   }
@@ -579,6 +548,139 @@ export async function logSetsWorkout({
     privacy: "onlyme",
     redirectedTo: res.headers.get("location"),
   };
+}
+
+// Logs a set-by-set lifting result (e.g. a class track's "Bench Press : 3 @
+// 80%, 3 @ 80%, ... 2 @ 85%" strength piece) against a specific prescribed
+// workout, optionally linked to a track event - unlike logWorkout, which
+// always posts a fresh single-movement "N Rep Max" result. Each prescribed
+// set keeps its movement, reps and prescribed load (e.g. 80% of 1RM) and gets
+// the actual weight lifted as its input - the same shape BTWB's
+// weightlifting/sets logger posts. Scoring stays "completed" as prescribed;
+// only percentage/pick-load weightlifting/sets workouts have been tested.
+export async function logSetsWorkout({
+  workoutId,
+  workoutSlug,
+  sets,
+  performedDate,
+  rxd = true,
+  notes = "",
+  trackEventId,
+}) {
+  const { csrfToken, workout } = await loadPrescribedWorkout(workoutId, workoutSlug, performedDate);
+  const prescription = workout.prescription || {};
+  if (prescription.type !== "weightlifting/sets") {
+    throw new Error(
+      `log_sets_workout only handles weightlifting/sets workouts; this one is "${prescription.type}".`
+    );
+  }
+  const prescribedSets = (workout.contents || []).filter((c) => c.type === "movement");
+  if (prescribedSets.length !== sets.length) {
+    throw new Error(
+      `This workout prescribes ${prescribedSets.length} sets but ${sets.length} were given - ` +
+        "pass one {weight} (and optional reps) per prescribed set, in order."
+    );
+  }
+
+  const contents = prescribedSets.map((set, i) => {
+    const { weight, weightUnit = "lbs", reps } = sets[i];
+    const { inputs, ...rest } = set;
+    return {
+      ...rest,
+      ...(reps != null ? { reps: { value: reps, unit: "reps" } } : {}),
+      inputs: { weight: { value: weight, unit: weightUnit } },
+    };
+  });
+
+  const { type, ...executionFields } = prescription;
+  const uiobject = {
+    type: "workoutSession",
+    execution: { type, ...executionFields, scoring: prescription.scoring || "completed" },
+    contents,
+  };
+
+  return postPrescribedSession({
+    toolName: "log_sets_workout",
+    workoutId,
+    workoutSlug,
+    csrfToken,
+    uiobject,
+    performedDate,
+    rxd,
+    notes,
+    trackEventId,
+  });
+}
+
+// Logs a finished "For Time" result (with or without a time cap) against a
+// specific prescribed workout, optionally linked to a track event - e.g. a
+// class track's chipper. The workout's movements, reps, distances and loads
+// come from its prescription; `loads` optionally overrides a movement's load
+// by position (for a scaled result, e.g. lighter kettlebells), null keeps the
+// prescribed one. Mirrors BTWB's forTime/timeCap logger for the "finished
+// under the cap" case (scoring totalTime); a capped result (reps at the cap)
+// isn't handled.
+export async function logForTimeWorkout({
+  workoutId,
+  workoutSlug,
+  totalTimeSeconds,
+  performedDate,
+  rxd = true,
+  loads = [],
+  notes = "",
+  trackEventId,
+}) {
+  const { csrfToken, workout } = await loadPrescribedWorkout(workoutId, workoutSlug, performedDate);
+  const prescription = workout.prescription || {};
+  if (!/^forTime/.test(prescription.type || "")) {
+    throw new Error(
+      `log_for_time_workout only handles For Time workouts; this one is "${prescription.type}".`
+    );
+  }
+  const capSeconds = prescription.timeCap?.time?.value;
+  if (capSeconds && totalTimeSeconds > capSeconds) {
+    throw new Error(
+      `${totalTimeSeconds}s is over the ${capSeconds}s time cap - capped results aren't supported.`
+    );
+  }
+
+  const contents = (workout.contents || []).map((item, i) => {
+    if (item.type !== "movement") return item;
+    const { inputs, ...rest } = item;
+    const load = loads[i];
+    return {
+      ...rest,
+      ...(load ? { weight: { value: load.weight, unit: load.weightUnit || "lbs" } } : {}),
+      ...(Array.isArray(inputs) && inputs.includes("reps") && item.reps
+        ? { inputs: { reps: item.reps } }
+        : {}),
+    };
+  });
+
+  const time = { value: totalTimeSeconds, unit: "seconds" };
+  const uiobject = {
+    type: "workoutSession",
+    execution: {
+      type: prescription.type,
+      ...(prescription.timeCap ? { timeCap: prescription.timeCap } : {}),
+      inputs: { time },
+      scoring: "totalTime",
+      result: { totalTime: time },
+    },
+    contents,
+  };
+
+  return postPrescribedSession({
+    toolName: "log_for_time_workout",
+    workoutId,
+    workoutSlug,
+    csrfToken,
+    uiobject,
+    performedDate,
+    rxd,
+    notes,
+    trackEventId,
+  });
 }
 
 // Logs a body-weight entry to BTWB's Weigh-Ins tracker (/members/{id}/weigh_ins),
