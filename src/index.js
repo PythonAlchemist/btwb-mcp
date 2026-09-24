@@ -9,6 +9,7 @@ import {
   searchMovement,
   logWorkout,
   logRoundsWorkout,
+  logWeighIn,
   getMovementHistory,
   getMemberId,
   getWorkoutSession,
@@ -161,6 +162,42 @@ const TOOLS = [
     },
   },
   {
+    name: "log_weigh_in",
+    description:
+      "Log a body-weight entry to BTWB's Weigh-Ins tracker (beyondthewhiteboard.com/" +
+      "members/{id}/weigh_ins) - the dedicated weigh-in feature, not the 'Weigh In' " +
+      "movement. Weight is in the member's BTWB measure system (pounds for Imperial). " +
+      "Note: BTWB's weigh-in form has no per-entry privacy setting, so visibility " +
+      "follows the member's BTWB account settings, same as a weigh-in entered by hand.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        weight: { type: "number", description: "Body weight, e.g. 238.9" },
+        weighedInDate: {
+          type: "string",
+          description: "Date weighed, format YYYY-MM-DD",
+        },
+        hour: {
+          type: "number",
+          description: "Hour weighed, 0-23 (default 7)",
+        },
+        minute: {
+          type: "number",
+          description: "Minute weighed; BTWB only stores :00/:15/:30/:45, so it's rounded down (default 0)",
+        },
+        percentBodyFat: {
+          type: "number",
+          description: "Optional body fat percentage",
+        },
+        notes: {
+          type: "string",
+          description: "Optional notes for the entry",
+        },
+      },
+      required: ["weight", "weighedInDate"],
+    },
+  },
+  {
     name: "get_movement_history",
     description:
       "Get the full logged history for a movement over a date range - every " +
@@ -263,6 +300,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "log_rounds_workout":
         result = await logRoundsWorkout(args);
+        break;
+      case "log_weigh_in":
+        result = await logWeighIn(args);
         break;
       case "get_movement_history":
         result = await getMovementHistory(args);

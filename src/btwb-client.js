@@ -411,6 +411,91 @@ export async function logRoundsWorkout({
   };
 }
 
+// Logs a body-weight entry to BTWB's Weigh-Ins tracker (/members/{id}/weigh_ins),
+// the same POST its "New Weigh In" form makes - a separate feature from the
+// "Weigh In" movement, which would go through logWorkout instead. Unlike the
+// workout logger, this form has NO per-entry privacy field: visibility follows
+// the member's BTWB account settings, same as a weigh-in entered by hand.
+// The form is loaded first (rather than the whiteboard) because it carries both
+// the CSRF token and the member's stored height, which the real form re-submits
+// with every weigh-in - sending it back unchanged keeps BTWB's BMI/body-fat math
+// from being fed a missing height.
+export async function logWeighIn({
+  weight,
+  weighedInDate,
+  hour = 7,
+  minute = 0,
+  percentBodyFat,
+  notes = "",
+}) {
+  const memberId = await getMemberId();
+  const formUrl = `${BASE_URL}/members/${memberId}/weigh_ins/new`;
+
+  let res = await fetch(formUrl, { headers: { Cookie: await getCookie() } });
+  cachedCookie = mergeSetCookies(cachedCookie, res.headers);
+  let html = await res.text();
+  let tokenMatch = html.match(/<meta name="csrf-token" content="([^"]+)"/);
+  if (!tokenMatch) {
+    // Same expired-session fallback as getCsrfToken().
+    await refreshSessionCookie();
+    res = await fetch(formUrl, { headers: { Cookie: await getCookie() } });
+    cachedCookie = mergeSetCookies(cachedCookie, res.headers);
+    html = await res.text();
+    tokenMatch = html.match(/<meta name="csrf-token" content="([^"]+)"/);
+    if (!tokenMatch) {
+      throw new Error(
+        "Could not find a CSRF token on the BTWB New Weigh In page even after " +
+          "refreshing the session - the page may have changed."
+      );
+    }
+  }
+  const csrfToken = tokenMatch[1];
+  const heightMatch = html.match(/value="([\d.]+)"[^>]*name="weigh_in\[height\]"/);
+  const metricMatch = html.match(/<option selected="selected" value="(true|false)">(?:Imperial|Metric)/);
+
+  const [year, month, day] = weighedInDate.split("-").map(Number);
+  // The form only offers :00/:15/:30/:45 - snap to the nearest option below.
+  const snappedMinute = Math.floor(minute / 15) * 15;
+
+  const body = new URLSearchParams({
+    authenticity_token: csrfToken,
+    "weigh_in[member_id]": String(memberId),
+    "weigh_in[weighed_in_at(1i)]": String(year),
+    "weigh_in[weighed_in_at(2i)]": String(month),
+    "weigh_in[weighed_in_at(3i)]": String(day),
+    "weigh_in[weighed_in_at(4i)]": String(hour).padStart(2, "0"),
+    "weigh_in[weighed_in_at(5i)]": String(snappedMinute).padStart(2, "0"),
+    "weigh_in[metric]": metricMatch ? metricMatch[1] : "false",
+    "weigh_in[weight]": String(weight),
+    "weigh_in[notes]": notes,
+    commit: "Create Weigh In",
+  });
+  if (heightMatch) body.set("weigh_in[height]", heightMatch[1]);
+  if (percentBodyFat != null) {
+    body.set("weigh_in[percent_body_fat]", String(percentBodyFat));
+  }
+
+  res = await fetch(`${BASE_URL}/weigh_ins`, {
+    method: "POST",
+    headers: {
+      Cookie: cachedCookie,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-CSRF-Token": csrfToken,
+    },
+    body,
+    redirect: "manual",
+  });
+
+  // Rails redirects (302/303) on success; a 200 means the form re-rendered
+  // with validation errors.
+  if (![302, 303].includes(res.status)) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`BTWB log_weigh_in failed: HTTP ${res.status}. ${text.slice(0, 300)}`);
+  }
+
+  return { success: true, redirectedTo: res.headers.get("location") };
+}
+
 export async function getMovementHistory({ memberId, movementId, movementSlug, days = 365 }) {
   memberId ??= await getMemberId();
   const seconds = Math.round(days * 86400);
