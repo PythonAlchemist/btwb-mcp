@@ -14,6 +14,31 @@ const PASSWORD_KEYCHAIN_SERVICE = "btwb-password";
 let cachedCookie;
 let keychainError;
 
+// Merges a response's Set-Cookie headers into a "name=value; name2=value2"
+// Cookie string, replacing same-named cookies. BTWB sets more than one cookie
+// at once (remember_me_token AND _btwb_session_id at sign-in, and a rotated
+// _btwb_session_id on page loads), and the CSRF token on a page is tied to the
+// _btwb_session_id sent with it - keeping only the first cookie makes every
+// write (log/delete) fail with HTTP 422 while reads still work.
+function mergeSetCookies(cookieString, headers) {
+  const setCookies =
+    typeof headers.getSetCookie === "function"
+      ? headers.getSetCookie()
+      : (headers.get("set-cookie") || "").split(/,(?=\s*[^;=\s]+=)/);
+
+  const jar = new Map();
+  for (const pair of (cookieString || "").split(";")) {
+    const i = pair.indexOf("=");
+    if (i > 0) jar.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
+  }
+  for (const setCookie of setCookies) {
+    const pair = setCookie.split(";")[0];
+    const i = pair.indexOf("=");
+    if (i > 0) jar.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
+  }
+  return [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
 function readSecretFromKeychain(service) {
   try {
     // process.env.USER is not reliable here - GUI-launched processes (like
@@ -95,7 +120,7 @@ export async function refreshSessionCookie() {
   }
 
   const signinRes = await fetch(`${BASE_URL}/signin`);
-  const signinCookie = signinRes.headers.get("set-cookie")?.split(";")[0];
+  const signinCookie = mergeSetCookies("", signinRes.headers);
   const signinHtml = await signinRes.text();
   const tokenMatch = signinHtml.match(/name="authenticity_token" value="([^"]+)"/);
   if (!tokenMatch) {
@@ -128,10 +153,10 @@ export async function refreshSessionCookie() {
     );
   }
 
-  const freshCookie = loginRes.headers.get("set-cookie")?.split(";")[0];
-  if (!freshCookie) {
+  if (!loginRes.headers.get("set-cookie")) {
     throw new Error("BTWB sign-in succeeded but didn't return a new session cookie.");
   }
+  const freshCookie = mergeSetCookies(signinCookie, loginRes.headers);
 
   try {
     execFileSync("security", [
@@ -160,6 +185,9 @@ async function fetchWhiteboardHtml() {
   if (!res.ok) {
     throw new Error(`Failed to load page for CSRF token: HTTP ${res.status}`);
   }
+  // Keep any rotated session cookie so the write that follows is sent with
+  // the same session this page's CSRF token belongs to.
+  cachedCookie = mergeSetCookies(cachedCookie, res.headers);
   return res.text();
 }
 
