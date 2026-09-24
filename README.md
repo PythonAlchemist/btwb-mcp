@@ -19,6 +19,7 @@ This project calls BTWB's internal, undocumented endpoints rather than a publish
 - **`search_movement(term)`** - search BTWB's movement library, returns `{id, name, modality, posting_trait}` matches.
 - **`log_workout(movementId, movementName, reps, weight, weightUnit, performedDate, notes)`** - logs a single-movement result (e.g. a 1RM). **Always posts with Privacy: Only Me** - this is hardcoded in `src/btwb-client.js` and is not an exposed parameter, on purpose.
 - **`log_rounds_workout(workoutId, workoutSlug, memberId, sections, totalTimeSeconds, performedDate, rxd, notes, trackEventId)`** - logs a multi-movement "rounds" result (e.g. a For Time WOD with several movements per round). Only "For Time" / total-time scoring is supported. **Always posts with Privacy: Only Me**, same as `log_workout`.
+- **`log_weigh_in(weight, weighedInDate, hour, minute, percentBodyFat, notes)`** - logs a body-weight entry to BTWB's Weigh-Ins tracker (the dedicated weigh-in feature, not the "Weigh In" movement). Re-submits the height already stored on your BTWB profile. **No per-entry privacy** - BTWB's weigh-in form has no privacy field, so visibility follows your BTWB account settings, same as entering one by hand.
 - **`get_movement_history(memberId, movementId, movementSlug, days)`** - pulls the full logged history for a movement over a date range: every individual set (date, reps, weight), not just PRs, plus a computed "Potential Max" trend line. `memberId` is optional and defaults to the signed-in member.
 - **`get_member_id()`** - returns the signed-in member's own numeric member ID, read from the "Analyze Dashboard" link in BTWB's navigation menu.
 - **`get_workout_session(sessionId)`** - fetches details of an already-logged result by its session ID.
@@ -114,7 +115,7 @@ This requires storing your actual BTWB **password** (not just a session cookie) 
 
 ## Privacy
 
-Every entry this server logs is posted with **Privacy: Only Me**, hardcoded in the client, not passed as a parameter. If you ever need a differently-scoped post, do it by hand in the BTWB app rather than changing this server's default.
+Every workout result this server logs is posted with **Privacy: Only Me**, hardcoded in the client, not passed as a parameter. The one exception is `log_weigh_in`: BTWB's Weigh-Ins form has no privacy field at all, so weigh-ins follow your BTWB account settings. If you ever need a differently-scoped post, do it by hand in the BTWB app rather than changing this server's default.
 
 ## How the endpoints were found
 
@@ -123,6 +124,7 @@ Documented in commit history / session notes: found by watching Network tab traf
 - Search: `GET /exercises/autocomplete_name.json?posting_trait=true&term={term}`
 - Log (single movement): `POST /workouts/logger` (form-encoded, CSRF-protected, `workout_session[definition]` JSON)
 - Log (multi-movement/rounds): `POST /workouts/{workoutId}-{slug}/workout_sessions` (form-encoded, CSRF-protected, `workout_session[uiobject]` JSON - a different field name and shape than the single-movement flow)
+- Weigh-in: `GET /members/{memberId}/weigh_ins/new` (CSRF token + stored height) then `POST /weigh_ins` (form-encoded: `weigh_in[weighed_in_at(1i-5i)]` date/hour/minute parts, `weigh_in[weight]`, `weigh_in[height]`, `weigh_in[metric]`, optional `weigh_in[percent_body_fat]`, `weigh_in[notes]`)
 - History: `GET /members/{memberId}/movements/{movementId}-{slug}/vmax?d={seconds}`
 - Single session detail: `GET /workout_sessions/{id}` (HTML scrape - no JSON endpoint)
 - Delete: `DELETE /workout_sessions/{id}` (CSRF-protected, same endpoint as the app's own "Delete" UJS links)
