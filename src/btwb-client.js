@@ -183,6 +183,32 @@ async function getCsrfToken() {
   return match[1];
 }
 
+// The signed-in member's own ID, read from the "Analyze Dashboard" link in
+// BTWB's navigation menu (/analyze/members/{id}) - that link always points at
+// the current user, unlike other /members/{id} links on the whiteboard, which
+// can belong to gym-mates. Cached for the process's lifetime.
+let cachedMemberId;
+
+export async function getMemberId() {
+  if (cachedMemberId) return cachedMemberId;
+
+  const pattern = /href="\/analyze\/members\/(\d+)"/;
+  let match = (await fetchWhiteboardHtml()).match(pattern);
+  if (!match) {
+    // Same expired-session fallback as getCsrfToken().
+    await refreshSessionCookie();
+    match = (await fetchWhiteboardHtml()).match(pattern);
+    if (!match) {
+      throw new Error(
+        "Could not find your member ID on the BTWB whiteboard page even after " +
+          "refreshing the session - BTWB's navigation markup may have changed."
+      );
+    }
+  }
+  cachedMemberId = Number(match[1]);
+  return cachedMemberId;
+}
+
 export async function searchMovement(term) {
   const res = await fetch(
     `${BASE_URL}/exercises/autocomplete_name.json?posting_trait=true&term=${encodeURIComponent(term)}`,
@@ -358,6 +384,7 @@ export async function logRoundsWorkout({
 }
 
 export async function getMovementHistory({ memberId, movementId, movementSlug, days = 365 }) {
+  memberId ??= await getMemberId();
   const seconds = Math.round(days * 86400);
   const res = await fetch(
     `${BASE_URL}/members/${memberId}/movements/${movementId}-${movementSlug}/vmax?d=${seconds}`,

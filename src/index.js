@@ -10,6 +10,7 @@ import {
   logWorkout,
   logRoundsWorkout,
   getMovementHistory,
+  getMemberId,
   getWorkoutSession,
   deleteWorkoutSession,
   refreshSessionCookie,
@@ -164,13 +165,17 @@ const TOOLS = [
     description:
       "Get the full logged history for a movement over a date range - every " +
       "individual set (date, reps, weight), not just PRs - plus a computed " +
-      "'Potential Max' trend line. Requires the BTWB member ID and the movement's " +
-      "numeric ID plus its URL slug (e.g. movementId 35, movementSlug 'deadlift' " +
-      "for beyondthewhiteboard.com/.../35-deadlift).",
+      "'Potential Max' trend line. Requires the movement's numeric ID plus its URL " +
+      "slug (e.g. movementId 35, movementSlug 'deadlift' for " +
+      "beyondthewhiteboard.com/.../35-deadlift). memberId defaults to the signed-in " +
+      "member (see get_member_id).",
     inputSchema: {
       type: "object",
       properties: {
-        memberId: { type: "number", description: "BTWB member/profile ID" },
+        memberId: {
+          type: "number",
+          description: "BTWB member/profile ID - omit to use the signed-in member",
+        },
         movementId: { type: "number", description: "Movement ID" },
         movementSlug: {
           type: "string",
@@ -182,8 +187,16 @@ const TOOLS = [
           description: "How many days of history to look back",
         },
       },
-      required: ["memberId", "movementId", "movementSlug"],
+      required: ["movementId", "movementSlug"],
     },
+  },
+  {
+    name: "get_member_id",
+    description:
+      "Get the signed-in BTWB member's own numeric member ID (the number in a " +
+      "beyondthewhiteboard.com/members/{id} URL), which log_rounds_workout needs " +
+      "and get_movement_history accepts.",
+    inputSchema: { type: "object", properties: {} },
   },
   {
     name: "get_workout_session",
@@ -253,6 +266,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "get_movement_history":
         result = await getMovementHistory(args);
+        break;
+      case "get_member_id":
+        result = { memberId: await getMemberId() };
         break;
       case "get_workout_session":
         result = await getWorkoutSession(args.sessionId);
