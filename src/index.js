@@ -10,6 +10,9 @@ import {
   logWorkout,
   logRoundsWorkout,
   logWeighIn,
+  getWeighIns,
+  getTrackEvents,
+  logSetsWorkout,
   getMovementHistory,
   getMemberId,
   getWorkoutSession,
@@ -198,6 +201,79 @@ const TOOLS = [
     },
   },
   {
+    name: "get_weigh_ins",
+    description:
+      "Read the signed-in member's BTWB Weigh-Ins tracker (beyondthewhiteboard.com/" +
+      "members/{id}/weigh_ins): each entry's weight, BTWB's change vs. the previous " +
+      "entry, and the weighed-in timestamp, newest first. Use it to confirm a " +
+      "log_weigh_in landed or to pull recent weights for averages.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        days: {
+          type: "number",
+          description: "Only return entries from the last N days (omit for every entry on the page)",
+        },
+      },
+    },
+  },
+  {
+    name: "get_track_events",
+    description:
+      "List the scheduled track events (class programming, personal tracks, etc.) on " +
+      "one day of the member's BTWB whiteboard calendar. Workout events include the " +
+      "trackEventId plus the underlying workoutId/workoutSlug that log_sets_workout " +
+      "and log_rounds_workout need to log a result against that track. Events that " +
+      "already have a logged result come back as kind 'logged' with their sessionId.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "Calendar day, format YYYY-MM-DD" },
+        track: {
+          type: "string",
+          description: "Optional case-insensitive filter on the track name, e.g. 'class'",
+        },
+      },
+      required: ["date"],
+    },
+  },
+  {
+    name: "log_sets_workout",
+    description:
+      "Log a set-by-set lifting result (a weightlifting/sets workout such as a class " +
+      "track's 'Bench Press : 3 @ 80%, ... 2 @ 85%') against that specific prescribed " +
+      "workout - one actual weight per prescribed set, in order - optionally linked " +
+      "to a track event. The performed date can differ from the track event's date " +
+      "(e.g. a Friday class piece done Thursday). Use get_track_events to find the " +
+      "workoutId/workoutSlug/trackEventId. Every entry logged through this tool is " +
+      "always posted with Privacy: Only Me - this is hardcoded and cannot be overridden.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workoutId: { type: "number", description: "Numeric workout ID (from get_track_events or the workout URL)" },
+        workoutSlug: { type: "string", description: "Workout URL slug (from get_track_events or the workout URL)" },
+        sets: {
+          type: "array",
+          description: "One entry per prescribed set, in order",
+          items: {
+            type: "object",
+            properties: {
+              weight: { type: "number", description: "Actual weight lifted" },
+              weightUnit: { type: "string", enum: ["lbs", "kg"], default: "lbs" },
+              reps: { type: "number", description: "Actual reps, only if different from the prescription" },
+            },
+            required: ["weight"],
+          },
+        },
+        performedDate: { type: "string", description: "Date performed, format YYYY-MM-DD" },
+        rxd: { type: "boolean", default: true, description: "true = As Prescribed (Rx'd), false = Modified/scaled" },
+        notes: { type: "string", description: "Optional notes for the entry" },
+        trackEventId: { type: "number", description: "Optional track_event ID to link the result to (from get_track_events)" },
+      },
+      required: ["workoutId", "workoutSlug", "sets", "performedDate"],
+    },
+  },
+  {
     name: "get_movement_history",
     description:
       "Get the full logged history for a movement over a date range - every " +
@@ -303,6 +379,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "log_weigh_in":
         result = await logWeighIn(args);
+        break;
+      case "get_weigh_ins":
+        result = await getWeighIns(args);
+        break;
+      case "get_track_events":
+        result = await getTrackEvents(args);
+        break;
+      case "log_sets_workout":
+        result = await logSetsWorkout(args);
         break;
       case "get_movement_history":
         result = await getMovementHistory(args);

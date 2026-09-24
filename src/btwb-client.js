@@ -411,6 +411,176 @@ export async function logRoundsWorkout({
   };
 }
 
+// Lists the scheduled track events (class programming, personal tracks, etc.)
+// on one day of the member's whiteboard calendar - the ids log_sets_workout /
+// log_rounds_workout need to link a result to a track. Scraped from the
+// whiteboard week view (/members/{id}/whiteboard/day?d=...), which renders the
+// whole week around that date; only the requested day's box is read. For
+// workout events, each event's details popup is also fetched for the
+// underlying workout's id and slug. `track` optionally filters by a
+// case-insensitive substring of the track name (e.g. "class").
+export async function getTrackEvents({ date, track } = {}) {
+  const memberId = await getMemberId();
+  const html = await fetchPageHtml(`/members/${memberId}/whiteboard/day?d=${date}`);
+
+  const trackNames = {};
+  for (const [, key, name] of html.matchAll(
+    /<li data-track-events="(track_\d+)"[^>]*>\s*<span[^>]*><\/span>\s*([^<]+?)\s*<\/li>/g
+  )) {
+    trackNames[key] = decodeHtmlEntities(name);
+  }
+
+  const dayStart = html.indexOf(`whiteboard/day?d=${date}"`);
+  if (dayStart < 0) {
+    throw new Error(`No ${date} box found on the BTWB whiteboard calendar.`);
+  }
+  const nextDay = html.indexOf('class="box box-day', dayStart);
+  const dayHtml = html.slice(dayStart, nextDay < 0 ? undefined : nextDay);
+
+  // Scheduled events render as track_event items; once a result has been
+  // logged against one, BTWB swaps it for a workout_session item instead.
+  const events = [];
+  const itemPattern =
+    /<li class="\w+ (track_\d+)">\s*<div class="view-task-details (track_event|workout_session)"\s*data-task="(\w+)"\s*data-uri="\/tasks\/members\/\d+\/(?:track_events|workout_sessions)\/(\d+)">([\s\S]*?)<\/li>/g;
+  for (const [, trackKey, itemType, kind, id, body] of dayHtml.matchAll(itemPattern)) {
+    const trackName = trackNames[trackKey] || trackKey;
+    if (track && !trackName.toLowerCase().includes(track.toLowerCase())) continue;
+    const title = decodeHtmlEntities(body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "));
+    events.push(
+      itemType === "workout_session"
+        ? { trackName, kind: "logged", sessionId: Number(id), title }
+        : { trackEventId: Number(id), trackName, kind, title }
+    );
+  }
+
+  for (const event of events.filter((e) => e.kind === "workout")) {
+    const details = await fetchPageHtml(
+      `/tasks/members/${memberId}/track_events/${event.trackEventId}`
+    ).catch(() => "");
+    const workout = details.match(/href="\/workouts\/(\d+)-([^"/?]+)"/);
+    if (workout) {
+      event.workoutId = Number(workout[1]);
+      event.workoutSlug = workout[2];
+    }
+  }
+
+  return { date, events };
+}
+
+// Logs a set-by-set lifting result (e.g. a class track's "Bench Press : 3 @
+// 80%, 3 @ 80%, ... 2 @ 85%" strength piece) against a specific prescribed
+// workout, optionally linked to a track event - unlike logWorkout, which
+// always posts a fresh single-movement "N Rep Max" result. The workout's own
+// "Log Result" page is loaded first for its prescription (the `var uiobject`
+// the BTWB logger is seeded with); each prescribed set keeps its movement,
+// reps and prescribed load (e.g. 80% of 1RM) and gets the actual weight lifted
+// as its input - the same shape BTWB's weightlifting/sets logger posts.
+// Scoring stays "completed" as prescribed; only percentage/pick-load
+// weightlifting/sets workouts have been tested.
+export async function logSetsWorkout({
+  workoutId,
+  workoutSlug,
+  sets,
+  performedDate,
+  rxd = true,
+  notes = "",
+  trackEventId,
+}) {
+  const memberId = await getMemberId();
+  const html = await fetchPageHtml(
+    `/workouts/${workoutId}-${workoutSlug}/workout_sessions/new?d=${performedDate}`
+  );
+  const csrfToken = html.match(/<meta name="csrf-token" content="([^"]+)"/)?.[1];
+  const prescriptionJson = html.match(/var uiobject =\s*(\{[\s\S]*?\})\s*;/)?.[1];
+  if (!csrfToken || !prescriptionJson) {
+    throw new Error(
+      "Could not read the workout's Log Result form (CSRF token or prescription) - " +
+        "check workoutId/workoutSlug, or BTWB's logger page may have changed."
+    );
+  }
+  const workout = JSON.parse(prescriptionJson);
+  const prescription = workout.prescription || {};
+  if (prescription.type !== "weightlifting/sets") {
+    throw new Error(
+      `log_sets_workout only handles weightlifting/sets workouts; this one is "${prescription.type}".`
+    );
+  }
+  const prescribedSets = (workout.contents || []).filter((c) => c.type === "movement");
+  if (prescribedSets.length !== sets.length) {
+    throw new Error(
+      `This workout prescribes ${prescribedSets.length} sets but ${sets.length} were given - ` +
+        "pass one {weight} (and optional reps) per prescribed set, in order."
+    );
+  }
+
+  const contents = prescribedSets.map((set, i) => {
+    const { weight, weightUnit = "lbs", reps } = sets[i];
+    const { inputs, ...rest } = set;
+    return {
+      ...rest,
+      ...(reps != null ? { reps: { value: reps, unit: "reps" } } : {}),
+      inputs: { weight: { value: weight, unit: weightUnit } },
+    };
+  });
+
+  const { type, ...executionFields } = prescription;
+  const uiobject = {
+    type: "workoutSession",
+    execution: { type, ...executionFields, scoring: prescription.scoring || "completed" },
+    contents,
+  };
+
+  const performedOn = new Date(`${performedDate}T00:00:00`).toLocaleDateString(
+    "en-US",
+    { weekday: "long", month: "long", day: "numeric", year: "numeric" }
+  );
+
+  const body = new URLSearchParams({
+    authenticity_token: csrfToken,
+    "workout_session[uiobject]": JSON.stringify(uiobject),
+    "workout_session[member_id]": String(memberId),
+    "workout_session[rxd]": String(rxd),
+    "workout_session[session_date]": performedDate,
+    performedOn,
+    "workout_session[notes_plain_text]": notes,
+    // Hard rule, not a default: every post through this server is private.
+    // Do not wire a parameter that can override this - see README "Privacy".
+    "workout_session[privacy]": "onlyme",
+    commit: "Log Result",
+  });
+  if (trackEventId) {
+    body.append("track_event_ids[]", String(trackEventId));
+  }
+
+  const res = await fetch(`${BASE_URL}/workouts/${workoutId}-${workoutSlug}/workout_sessions`, {
+    method: "POST",
+    headers: {
+      Cookie: cachedCookie,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-CSRF-Token": csrfToken,
+    },
+    body,
+    redirect: "manual",
+  });
+
+  if (![302, 303].includes(res.status)) {
+    const text = await res.text().catch(() => "");
+    const errors = [...text.matchAll(/<li>([^<]+)<\/li>/g)]
+      .map((m) => m[1])
+      .filter((t) => /must|can't|invalid|blank/i.test(t));
+    throw new Error(
+      `BTWB log_sets_workout failed: HTTP ${res.status}.` +
+        (errors.length ? ` ${errors.join("; ")}` : ` ${text.slice(0, 300)}`)
+    );
+  }
+
+  return {
+    success: true,
+    privacy: "onlyme",
+    redirectedTo: res.headers.get("location"),
+  };
+}
+
 // Logs a body-weight entry to BTWB's Weigh-Ins tracker (/members/{id}/weigh_ins),
 // the same POST its "New Weigh In" form makes - a separate feature from the
 // "Weigh In" movement, which would go through logWorkout instead. Unlike the
@@ -451,6 +621,16 @@ export async function logWeighIn({
   }
   const csrfToken = tokenMatch[1];
   const heightMatch = html.match(/value="([\d.]+)"[^>]*name="weigh_in\[height\]"/);
+  // In Imperial mode BTWB rebuilds height from these two separate selects
+  // (feet/inches, outside the weigh_in[...] namespace) and ignores
+  // weigh_in[height] - without them every weigh-in fails validation with
+  // "Height must be greater than 0" (the form just re-renders with HTTP 200).
+  const selectedOption = (name) =>
+    html
+      .match(new RegExp(`<select name="${name}"[\\s\\S]*?</select>`))?.[0]
+      .match(/<option selected="selected" value="(\d+)"/)?.[1];
+  const feet = selectedOption("feet");
+  const inches = selectedOption("inches");
   const metricMatch = html.match(/<option selected="selected" value="(true|false)">(?:Imperial|Metric)/);
 
   const [year, month, day] = weighedInDate.split("-").map(Number);
@@ -471,6 +651,8 @@ export async function logWeighIn({
     commit: "Create Weigh In",
   });
   if (heightMatch) body.set("weigh_in[height]", heightMatch[1]);
+  if (feet) body.set("feet", feet);
+  if (inches) body.set("inches", inches);
   if (percentBodyFat != null) {
     body.set("weigh_in[percent_body_fat]", String(percentBodyFat));
   }
@@ -494,6 +676,41 @@ export async function logWeighIn({
   }
 
   return { success: true, redirectedTo: res.headers.get("location") };
+}
+
+// Reads the member's Weigh-Ins tracker (/members/{id}/weigh_ins). There's no
+// JSON endpoint, so this scrapes the page's entry list (id, weight, BTWB's own
+// change-vs-previous, and the weighed-in timestamp). Newest first. `days`
+// filters to entries within that many days of now.
+export async function getWeighIns({ days } = {}) {
+  const memberId = await getMemberId();
+  const html = await fetchPageHtml(`/members/${memberId}/weigh_ins`);
+
+  const cutoff = days != null ? Date.now() - days * 86400000 : null;
+  const entries = [];
+  const itemPattern = /<li id="weigh_in_(\d+)" class="weigh-in">([\s\S]*?)<\/li>/g;
+  for (const [, id, item] of html.matchAll(itemPattern)) {
+    const weight = item.match(/href="\/weigh_ins\/\d+">([\d.]+)\s*(lbs|kg)</);
+    const change = item.match(/weigh-ins__value--change">\s*\(([-+]?[\d.]+)/);
+    const at = item.match(/datetime="([^"]+)"/);
+    if (!weight || !at) continue;
+    if (cutoff != null && Date.parse(at[1]) < cutoff) continue;
+    entries.push({
+      id: Number(id),
+      weighedInAt: at[1],
+      weight: Number(weight[1]),
+      unit: weight[2],
+      change: change ? Number(change[1]) : null,
+      url: `${BASE_URL}/weigh_ins/${id}`,
+    });
+  }
+
+  const totalMatch = html.match(/weigh-ins__total-entries">\s*(\d+) Weigh Ins/);
+  return {
+    memberId,
+    totalWeighIns: totalMatch ? Number(totalMatch[1]) : null,
+    entries,
+  };
 }
 
 export async function getMovementHistory({ memberId, movementId, movementSlug, days = 365 }) {
@@ -599,4 +816,20 @@ export async function getWorkoutSession(sessionId) {
     level: levelMatch ? Number(levelMatch[1]) : null,
     wodRank: wodRankMatch ? Number(wodRankMatch[1]) : null,
   };
+}
+
+// Authenticated GET of any BTWB page, returning its HTML - with the same
+// expired-session fallback as getCsrfToken(). Used by the scraping readers.
+async function fetchPageHtml(path) {
+  let res = await fetch(`${BASE_URL}${path}`, { headers: { Cookie: await getCookie() } });
+  cachedCookie = mergeSetCookies(cachedCookie, res.headers);
+  let html = await res.text();
+  if (!/<meta name="csrf-token"/.test(html)) {
+    await refreshSessionCookie();
+    res = await fetch(`${BASE_URL}${path}`, { headers: { Cookie: await getCookie() } });
+    cachedCookie = mergeSetCookies(cachedCookie, res.headers);
+    html = await res.text();
+  }
+  if (!res.ok) throw new Error(`BTWB fetch of ${path} failed: HTTP ${res.status}`);
+  return html;
 }
