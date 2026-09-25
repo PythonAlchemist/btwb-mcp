@@ -843,7 +843,7 @@ export async function getMovementHistory({ memberId, movementId, movementSlug, d
 // Body is a single `definition` field holding JSON; the CSRF token rides in
 // the X-CSRF-Token header, not the body, the same way postPrescribedSession
 // sends it.
-async function saveWorkoutDefinition({ toolName, prescription, contents }) {
+async function saveWorkoutDefinition({ toolName, prescription, contents, name, description }) {
   const csrfToken = await getCsrfToken();
   const definition = { type: "workout", prescription, contents };
 
@@ -862,17 +862,77 @@ async function saveWorkoutDefinition({ toolName, prescription, contents }) {
     throw new Error(`BTWB ${toolName} failed: HTTP ${res.status}. ${text.slice(0, 300)}`);
   }
 
-  const idMatch = text.match(/\(id:\s*(\d+)\)/) || text.match(/\/workouts\/(\d+)-/);
-  const nameMatch = text.match(/Workout (?:Found|Created):\s*([^<(]+?)\s*\(id:/);
-  const slugMatch = text.match(/\/workouts\/\d+-([^"/?]+)/);
+  // Match found - BTWB resolved the prescription to a workout already in its
+  // library and there's nothing to create.
+  const found = text.match(/Workout Found:\s*([^<(]+?)\s*\(id:\s*(\d+)\)/);
+  if (found) {
+    return {
+      workoutId: Number(found[2]),
+      workoutName: decodeHtmlEntities(found[1].trim()),
+      existing: true,
+      definition,
+    };
+  }
 
+  // No match: BTWB answers with the "name it and save" form instead. Its
+  // workout[name]/[description] fields come back EMPTY - the real page fills
+  // them in client-side from the builder's knockout view model - so a caller
+  // has to supply the name itself.
+  const createForm = /id="new-workout-form"/.test(text);
+  if (!createForm) {
+    throw new Error(
+      `BTWB ${toolName}: unrecognised builder response. ${text.slice(0, 300)}`
+    );
+  }
+  if (!name) {
+    return {
+      workoutId: null,
+      existing: false,
+      created: false,
+      needsName: true,
+      message:
+        "No workout in BTWB's library matches this prescription. Pass `name` " +
+        "to create it (BTWB builds the display name in the browser, so it " +
+        "can't be derived server-side).",
+      definition,
+    };
+  }
+
+  const formToken = text.match(/name="authenticity_token" value="([^"]+)"/)?.[1] || csrfToken;
+  const createRes = await fetch(`${BASE_URL}/workouts`, {
+    method: "POST",
+    headers: {
+      Cookie: cachedCookie,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-CSRF-Token": csrfToken,
+    },
+    body: new URLSearchParams({
+      authenticity_token: formToken,
+      "workout[name]": name,
+      "workout[description]": description || name,
+      "workout[uiobject]": JSON.stringify(definition),
+      commit: "Save",
+    }),
+    redirect: "manual",
+  });
+
+  if (![302, 303].includes(createRes.status)) {
+    const body = await createRes.text().catch(() => "");
+    throw new Error(
+      `BTWB ${toolName} create failed: HTTP ${createRes.status}. ${body.slice(0, 300)}`
+    );
+  }
+
+  const location = createRes.headers.get("location") || "";
+  const idMatch = location.match(/\/workouts\/(\d+)-([^/?]+)/);
   return {
     workoutId: idMatch ? Number(idMatch[1]) : null,
-    workoutName: nameMatch ? decodeHtmlEntities(nameMatch[1].trim()) : null,
-    workoutSlug: slugMatch ? slugMatch[1] : null,
-    existing: /Workout Found/i.test(text),
+    workoutSlug: idMatch ? idMatch[2] : null,
+    workoutName: name,
+    existing: false,
+    created: true,
+    redirectedTo: location,
     definition,
-    raw: text.slice(0, 400),
   };
 }
 
@@ -881,18 +941,31 @@ async function saveWorkoutDefinition({ toolName, prescription, contents }) {
 // a slash - even though the builder's own JS calls it weightliftingSets.
 // `contents` repeats the movement once PER SET rather than carrying a set
 // count, which is how the real form posts it.
+//
+// `maxReps: true` prescribes max-effort sets ("3 x ME") instead of a fixed
+// count - the builder's rep dropdown offers "reps" or "max reps", and the
+// latter posts the same reps object with unit "maxreps" and no value.
 export async function createSetsWorkout({
   movementName,
   movementId,
   sets,
   reps,
+  maxReps = false,
   weightPerSet = "heaviest",
+  name,
+  description,
 }) {
+  if (!maxReps && reps == null) {
+    throw new Error("create_sets_workout needs either reps or maxReps: true.");
+  }
+
+  const repsObject = maxReps ? { unit: "maxreps" } : { value: reps, unit: "reps" };
+
   const contents = Array.from({ length: sets }, () => ({
     type: "movement",
     movementName,
     movementId,
-    reps: { value: reps, unit: "reps" },
+    reps: repsObject,
     inputs: ["weight"],
   }));
 
@@ -900,6 +973,8 @@ export async function createSetsWorkout({
     toolName: "create_sets_workout",
     prescription: { type: "weightlifting/sets", weightPerSet, scoring: "totalWeight" },
     contents,
+    name,
+    description,
   });
 }
 
@@ -907,7 +982,7 @@ export async function createSetsWorkout({
 // fixed time. Scored on total rounds, which is the scoring type none of the
 // log_* tools handle yet. Movement `reps` are optional: BTWB omits the key
 // entirely when a movement has no prescribed reps.
-export async function createAmrapWorkout({ minutes, movements }) {
+export async function createAmrapWorkout({ minutes, movements, name, description }) {
   const contents = movements.map(({ movementName, movementId, reps }) => ({
     type: "movement",
     movementName,
@@ -924,6 +999,8 @@ export async function createAmrapWorkout({ minutes, movements }) {
       scoring: "totalRounds",
     },
     contents,
+    name,
+    description,
   });
 }
 
