@@ -15,6 +15,8 @@ import {
   logSetsWorkout,
   logForTimeWorkout,
   getMovementHistory,
+  createSetsWorkout,
+  createAmrapWorkout,
   getMemberId,
   getWorkoutSession,
   deleteWorkoutSession,
@@ -239,6 +241,62 @@ const TOOLS = [
     },
   },
   {
+    name: "create_sets_workout",
+    description:
+      "Define a single-movement Sets workout in BTWB (e.g. 'Bench Press : 3-3-3') and " +
+      "get back its workoutId/workoutSlug, which log_sets_workout then logs a result " +
+      "against. This is find-OR-create: an identical prescription resolves to the " +
+      "workout already in BTWB's shared library rather than creating a duplicate, so " +
+      "it is safe to call repeatedly and the id is usually one other athletes share " +
+      "(making results comparable). Use search_movement to get the movementId.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        movementName: { type: "string", description: "Movement name exactly as BTWB spells it, e.g. 'Bench Press'" },
+        movementId: { type: "number", description: "Numeric movement ID (from search_movement)" },
+        sets: { type: "number", description: "Number of sets, e.g. 3 for 3-3-3" },
+        reps: { type: "number", description: "Reps per set, e.g. 3 for 3-3-3" },
+        weightPerSet: {
+          type: "string",
+          enum: ["heaviest", "same", "onerepmax", "xbodyweight", "assign"],
+          default: "heaviest",
+          description: "How the weight is prescribed across sets",
+        },
+      },
+      required: ["movementName", "movementId", "sets", "reps"],
+    },
+  },
+  {
+    name: "create_amrap_workout",
+    description:
+      "Define an AMRAP workout in BTWB - as many rounds as possible of the given " +
+      "movements within a time cap - and get back its workoutId/workoutSlug. Scored " +
+      "on total rounds. Like create_sets_workout this is find-OR-create, so an " +
+      "identical AMRAP resolves to the existing library workout. Use search_movement " +
+      "to get each movementId. NOTE: no log_* tool can record an AMRAP result yet; " +
+      "this defines the workout only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        minutes: { type: "number", description: "Time cap in minutes, e.g. 20 for Cindy" },
+        movements: {
+          type: "array",
+          description: "Movements in the round, in order",
+          items: {
+            type: "object",
+            properties: {
+              movementName: { type: "string", description: "Movement name exactly as BTWB spells it" },
+              movementId: { type: "number", description: "Numeric movement ID (from search_movement)" },
+              reps: { type: "number", description: "Reps per round; omit for a movement with no prescribed reps" },
+            },
+            required: ["movementName", "movementId"],
+          },
+        },
+      },
+      required: ["minutes", "movements"],
+    },
+  },
+  {
     name: "log_sets_workout",
     description:
       "Log a set-by-set lifting result (a weightlifting/sets workout such as a class " +
@@ -424,6 +482,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "get_track_events":
         result = await getTrackEvents(args);
+        break;
+      case "create_sets_workout":
+        result = await createSetsWorkout(args);
+        break;
+      case "create_amrap_workout":
+        result = await createAmrapWorkout(args);
         break;
       case "log_sets_workout":
         result = await logSetsWorkout(args);

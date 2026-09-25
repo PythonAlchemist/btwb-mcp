@@ -828,6 +828,105 @@ export async function getMovementHistory({ memberId, movementId, movementSlug, d
   return res.json();
 }
 
+// Posts a workout *definition* (a prescription, not a result) to BTWB's
+// workout builder - the same request its "Build Workout" wizard submits when
+// you press "Next: Confirm & Save". Captured by filling the wizard in and
+// reading the POST it makes.
+//
+// The endpoint is find-OR-create: an identical prescription resolves to the
+// workout already in BTWB's library instead of creating a duplicate (building
+// "Bench Press, 3 sets of 3" answers "Workout Found: Bench Press : 3-3-3
+// (id: 9385)"). That makes it safe to call repeatedly - it won't litter the
+// library - and means the id you get back is usually one everyone already
+// shares, so results are comparable across the site.
+//
+// Body is a single `definition` field holding JSON; the CSRF token rides in
+// the X-CSRF-Token header, not the body, the same way postPrescribedSession
+// sends it.
+async function saveWorkoutDefinition({ toolName, prescription, contents }) {
+  const csrfToken = await getCsrfToken();
+  const definition = { type: "workout", prescription, contents };
+
+  const res = await fetch(`${BASE_URL}/workouts/builder/save`, {
+    method: "POST",
+    headers: {
+      Cookie: cachedCookie,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-CSRF-Token": csrfToken,
+    },
+    body: new URLSearchParams({ definition: JSON.stringify(definition) }),
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`BTWB ${toolName} failed: HTTP ${res.status}. ${text.slice(0, 300)}`);
+  }
+
+  const idMatch = text.match(/\(id:\s*(\d+)\)/) || text.match(/\/workouts\/(\d+)-/);
+  const nameMatch = text.match(/Workout (?:Found|Created):\s*([^<(]+?)\s*\(id:/);
+  const slugMatch = text.match(/\/workouts\/\d+-([^"/?]+)/);
+
+  return {
+    workoutId: idMatch ? Number(idMatch[1]) : null,
+    workoutName: nameMatch ? decodeHtmlEntities(nameMatch[1].trim()) : null,
+    workoutSlug: slugMatch ? slugMatch[1] : null,
+    existing: /Workout Found/i.test(text),
+    definition,
+    raw: text.slice(0, 400),
+  };
+}
+
+// Defines a single-movement "Sets" workout (e.g. "Bench Press : 3-3-3").
+// BTWB's wire format spells this prescription type "weightlifting/sets" - with
+// a slash - even though the builder's own JS calls it weightliftingSets.
+// `contents` repeats the movement once PER SET rather than carrying a set
+// count, which is how the real form posts it.
+export async function createSetsWorkout({
+  movementName,
+  movementId,
+  sets,
+  reps,
+  weightPerSet = "heaviest",
+}) {
+  const contents = Array.from({ length: sets }, () => ({
+    type: "movement",
+    movementName,
+    movementId,
+    reps: { value: reps, unit: "reps" },
+    inputs: ["weight"],
+  }));
+
+  return saveWorkoutDefinition({
+    toolName: "create_sets_workout",
+    prescription: { type: "weightlifting/sets", weightPerSet, scoring: "totalWeight" },
+    contents,
+  });
+}
+
+// Defines an AMRAP - as many rounds as possible of the given movements in a
+// fixed time. Scored on total rounds, which is the scoring type none of the
+// log_* tools handle yet. Movement `reps` are optional: BTWB omits the key
+// entirely when a movement has no prescribed reps.
+export async function createAmrapWorkout({ minutes, movements }) {
+  const contents = movements.map(({ movementName, movementId, reps }) => ({
+    type: "movement",
+    movementName,
+    movementId,
+    ...(reps != null ? { reps: { value: reps, unit: "reps" } } : {}),
+  }));
+
+  return saveWorkoutDefinition({
+    toolName: "create_amrap_workout",
+    prescription: {
+      type: "amrap",
+      time: { value: Math.round(minutes * 60), unit: "seconds" },
+      inputs: ["rounds"],
+      scoring: "totalRounds",
+    },
+    contents,
+  });
+}
+
 // Rails' standard destroy action - the same request its own UJS delete links
 // (data-method="delete") trigger, just issued directly as a real HTTP DELETE
 // instead of simulating the link click.
