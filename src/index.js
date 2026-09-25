@@ -18,6 +18,7 @@ import {
   createSetsWorkout,
   createAmrapWorkout,
   createForDistanceWorkout,
+  createIntervalsWorkout,
   getTracks,
   scheduleWorkout,
   deleteTrackEvent,
@@ -272,6 +273,39 @@ const TOOLS = [
         description: { type: "string", description: "Optional description for a newly created workout" },
       },
       required: ["movementName", "movementId", "durationSeconds"],
+    },
+  },
+  {
+    name: "create_intervals_workout",
+    description:
+      "Define a monostructural intervals workout - repeated efforts over a fixed " +
+      "distance, each timed (e.g. 'Run : 4x 800 m at 80%, rest 2 mins'). Mirror image " +
+      "of create_for_distance_workout: that one fixes time and measures distance, this " +
+      "fixes distance and measures time. Find-OR-create; use schedule_workout to put " +
+      "it on the calendar.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        movementName: { type: "string", description: "Movement name exactly as BTWB spells it, e.g. 'Run'" },
+        movementId: { type: "number", description: "Numeric movement ID (from search_movement)" },
+        intervals: { type: "number", description: "Number of efforts, e.g. 4 for 4x800m" },
+        distance: { type: "number", description: "Distance per effort, e.g. 800" },
+        distanceUnit: { type: "string", enum: ["m", "km", "ft", "yd", "mi", "in"], default: "m" },
+        restSeconds: {
+          type: "number",
+          enum: [10, 15, 20, 30, 45, 60, 90, 120, 150, 180, 240],
+          description: "Rest between efforts. BTWB's picker offers only these values",
+        },
+        rpe: {
+          type: "number",
+          description:
+            "Optional intended effort, Borg scale 6-20: 9 very light, 11 fairly light, " +
+            "13 steady pace, 15 hard, 17 very hard. The only way this API states effort",
+        },
+        name: { type: "string", description: "Name to create under, only used when nothing matches" },
+        description: { type: "string", description: "Optional description for a newly created workout" },
+      },
+      required: ["movementName", "movementId", "intervals", "distance"],
     },
   },
   {
@@ -585,6 +619,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "create_for_distance_workout":
         result = await createForDistanceWorkout(args);
+        break;
+      case "create_intervals_workout":
+        result = await createIntervalsWorkout(args);
         break;
       case "get_tracks":
         result = await getTracks(args);

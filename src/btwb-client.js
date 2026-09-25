@@ -1047,6 +1047,67 @@ export async function createForDistanceWorkout({
   });
 }
 
+// Defines a monostructural "Intervals / Repeats" workout - repeated efforts
+// over a fixed distance, each timed (e.g. "Run : 4x 800 m at 80%, rest 2
+// mins"). Same #single/distance branch as createForDistanceWorkout; the two
+// are mirror images and differ by which dimension is prescribed:
+//
+//   For Distance : fixed time,     collects distance, scoring totalDistance
+//   Intervals    : fixed distance, collects time,     scoring totalTime
+//
+// `restSeconds` maps to BTWB's rest picker, which only offers 10/15/20/30/45/
+// 60/90/120/150/180/240 - other values are rejected.
+export async function createIntervalsWorkout({
+  movementName,
+  movementId,
+  intervals,
+  distance,
+  distanceUnit = "m",
+  restSeconds,
+  rpe,
+  name,
+  description,
+}) {
+  if (!intervals || !distance) {
+    throw new Error("create_intervals_workout needs intervals and distance.");
+  }
+  const UNITS = ["m", "km", "ft", "yd", "mi", "in"];
+  if (!UNITS.includes(distanceUnit)) {
+    throw new Error(`distanceUnit must be one of ${UNITS.join(", ")} (got "${distanceUnit}").`);
+  }
+  const RESTS = [10, 15, 20, 30, 45, 60, 90, 120, 150, 180, 240];
+  if (restSeconds != null && !RESTS.includes(restSeconds)) {
+    throw new Error(
+      `restSeconds must be one of ${RESTS.join(", ")} - BTWB's picker offers no others ` +
+        `(got ${restSeconds}).`
+    );
+  }
+  if (rpe != null && (rpe < 6 || rpe > 20)) {
+    throw new Error(`rpe must be on BTWB's Borg scale, 6-20 (got ${rpe}).`);
+  }
+
+  const movement = {
+    type: "movement",
+    movementName,
+    movementId,
+    distance: { value: distance, unit: distanceUnit },
+    inputs: ["time"],
+  };
+
+  return saveWorkoutDefinition({
+    toolName: "create_intervals_workout",
+    prescription: {
+      type: "monostructural/sets",
+      ...(restSeconds != null ? { rest: { value: restSeconds, unit: "seconds" } } : {}),
+      ...(rpe != null ? { tempo: { value: rpe, unit: "RPE" } } : {}),
+      scoring: "totalTime",
+    },
+    contents: Array.from({ length: intervals }, () => movement),
+    name,
+    description,
+  });
+}
+
 // Defines an AMRAP - as many rounds as possible of the given movements in a
 // fixed time. Scored on total rounds, which is the scoring type none of the
 // log_* tools handle yet. Movement `reps` are optional: BTWB omits the key
