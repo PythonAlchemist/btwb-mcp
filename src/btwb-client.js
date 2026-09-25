@@ -936,21 +936,32 @@ async function saveWorkoutDefinition({ toolName, prescription, contents, name, d
   };
 }
 
-// Defines a single-movement "Sets" workout (e.g. "Bench Press : 3-3-3").
-// BTWB's wire format spells this prescription type "weightlifting/sets" - with
-// a slash - even though the builder's own JS calls it weightliftingSets.
+// Defines a single-movement "Sets" workout (e.g. "Bench Press : 3-3-3",
+// "Ring Dips : 3x Max Rep"). BTWB's builder has two separate branches for this
+// - #single/weight for loaded movements and #single/reps for bodyweight
+// gymnastics - and they post different prescriptions. Pass bodyweight: true for
+// a gymnastics movement (search_movement reports those with posting_trait
+// "reps" / modality "gymnastics").
+//
+// All four combinations were captured from the real wizard; none of it is
+// guessable from the others, so the table is written out rather than derived:
+//
+//   branch      reps   type                 scoring      movement reps  inputs
+//   ---------------------------------------------------------------------------
+//   weight      fixed  weightlifting/sets   totalWeight  {value,unit}   [weight]
+//   weight      max    weightlifting/sets   totalWeight  -              [reps,weight]
+//   gymnastics  fixed  gymnastics/sets      completed    {value,unit}   -
+//   gymnastics  max    gymnastics/sets      totalReps    -              [reps]
+//
 // `contents` repeats the movement once PER SET rather than carrying a set
 // count, which is how the real form posts it.
-//
-// `maxReps: true` prescribes max-effort sets ("3 x ME") instead of a fixed
-// count - the builder's rep dropdown offers "reps" or "max reps", and the
-// latter posts the same reps object with unit "maxreps" and no value.
 export async function createSetsWorkout({
   movementName,
   movementId,
   sets,
   reps,
   maxReps = false,
+  bodyweight = false,
   weightPerSet = "heaviest",
   name,
   description,
@@ -959,20 +970,27 @@ export async function createSetsWorkout({
     throw new Error("create_sets_workout needs either reps or maxReps: true.");
   }
 
-  const repsObject = maxReps ? { unit: "maxreps" } : { value: reps, unit: "reps" };
+  const prescription = bodyweight
+    ? { type: "gymnastics/sets", scoring: maxReps ? "totalReps" : "completed" }
+    : { type: "weightlifting/sets", weightPerSet, scoring: "totalWeight" };
 
-  const contents = Array.from({ length: sets }, () => ({
+  // What the logger collects afterwards: reps only when they aren't already
+  // prescribed, weight only when the movement is loaded. A prescribed-reps
+  // gymnastics set collects nothing, so the key is left off entirely.
+  const inputs = [...(maxReps ? ["reps"] : []), ...(bodyweight ? [] : ["weight"])];
+
+  const movement = {
     type: "movement",
     movementName,
     movementId,
-    reps: repsObject,
-    inputs: ["weight"],
-  }));
+    ...(maxReps ? {} : { reps: { value: reps, unit: "reps" } }),
+    ...(inputs.length ? { inputs } : {}),
+  };
 
   return saveWorkoutDefinition({
     toolName: "create_sets_workout",
-    prescription: { type: "weightlifting/sets", weightPerSet, scoring: "totalWeight" },
-    contents,
+    prescription,
+    contents: Array.from({ length: sets }, () => movement),
     name,
     description,
   });

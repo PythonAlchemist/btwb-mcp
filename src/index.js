@@ -261,6 +261,16 @@ const TOOLS = [
           default: false,
           description: "true prescribes max-effort sets ('3 x ME') instead of a fixed rep count",
         },
+        bodyweight: {
+          type: "boolean",
+          default: false,
+          description:
+            "true for a bodyweight gymnastics movement (search_movement reports these " +
+            "with modality 'gymnastics' / posting_trait 'reps', e.g. Ring Dip, Pull-up). " +
+            "BTWB posts a different prescription for these than for loaded movements, so " +
+            "getting this wrong produces a workout that matches nothing and silently " +
+            "creates a malformed duplicate.",
+        },
         weightPerSet: {
           type: "string",
           enum: ["heaviest", "same", "onerepmax", "xbodyweight", "assign"],
