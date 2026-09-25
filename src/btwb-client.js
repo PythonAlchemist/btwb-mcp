@@ -996,6 +996,57 @@ export async function createSetsWorkout({
   });
 }
 
+// Defines a monostructural "For Distance" workout - run/row/bike/ski for a
+// fixed time, scored on the distance covered (e.g. "Run : 30 mins"). This is
+// BTWB's third builder branch, #single/distance, alongside #single/weight and
+// #single/reps.
+//
+//   prescription: { type: "monostructural/sets", scoring: "totalDistance",
+//                   tempo?: { value, unit: "RPE" } }
+//   movement:     { time: { value, unit: "seconds" }, inputs: ["distance"] }
+//
+// `rpe` is optional and uses the Borg scale BTWB exposes (6-20): 9 is "very
+// light", 11 "fairly light", 13 "steady pace", 15 "hard", 17 "very hard". It's
+// the only way this API expresses intended effort - there's no heart-rate
+// target - so an easy aerobic run is best said as a low RPE rather than left
+// blank, which would otherwise read as "run this as hard as you can".
+export async function createForDistanceWorkout({
+  movementName,
+  movementId,
+  sets = 1,
+  durationSeconds,
+  rpe,
+  name,
+  description,
+}) {
+  if (!durationSeconds) {
+    throw new Error("create_for_distance_workout needs durationSeconds.");
+  }
+  if (rpe != null && (rpe < 6 || rpe > 20)) {
+    throw new Error(`rpe must be on BTWB's Borg scale, 6-20 (got ${rpe}).`);
+  }
+
+  const movement = {
+    type: "movement",
+    movementName,
+    movementId,
+    time: { value: Math.round(durationSeconds), unit: "seconds" },
+    inputs: ["distance"],
+  };
+
+  return saveWorkoutDefinition({
+    toolName: "create_for_distance_workout",
+    prescription: {
+      type: "monostructural/sets",
+      ...(rpe != null ? { tempo: { value: rpe, unit: "RPE" } } : {}),
+      scoring: "totalDistance",
+    },
+    contents: Array.from({ length: sets }, () => movement),
+    name,
+    description,
+  });
+}
+
 // Defines an AMRAP - as many rounds as possible of the given movements in a
 // fixed time. Scored on total rounds, which is the scoring type none of the
 // log_* tools handle yet. Movement `reps` are optional: BTWB omits the key

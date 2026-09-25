@@ -17,6 +17,7 @@ import {
   getMovementHistory,
   createSetsWorkout,
   createAmrapWorkout,
+  createForDistanceWorkout,
   getTracks,
   scheduleWorkout,
   deleteTrackEvent,
@@ -241,6 +242,36 @@ const TOOLS = [
         },
       },
       required: ["date"],
+    },
+  },
+  {
+    name: "create_for_distance_workout",
+    description:
+      "Define a monostructural 'For Distance' workout - run/row/bike/ski for a fixed " +
+      "time, scored on distance covered (e.g. 'Run : 1x 30 mins at 60%'). This is " +
+      "BTWB's third builder branch, for movements search_movement reports as modality " +
+      "'monostructural'. Like the other create tools it is find-OR-create. Use " +
+      "schedule_workout afterwards to put it on the calendar.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        movementName: { type: "string", description: "Movement name exactly as BTWB spells it, e.g. 'Run'" },
+        movementId: { type: "number", description: "Numeric movement ID (from search_movement)" },
+        durationSeconds: { type: "number", description: "Duration of each effort in seconds, e.g. 1800 for 30 mins" },
+        sets: { type: "number", default: 1, description: "Number of efforts; 1 for a single continuous piece" },
+        rpe: {
+          type: "number",
+          description:
+            "Optional intended effort on BTWB's Borg scale, 6-20: 9 very light, " +
+            "11 fairly light, 13 steady pace, 15 hard, 17 very hard. This is the only " +
+            "way the API expresses effort - there is no heart-rate target - so set it " +
+            "low for easy aerobic work rather than leaving it blank, which reads as " +
+            "an all-out effort.",
+        },
+        name: { type: "string", description: "Name to create under, only used when nothing matches" },
+        description: { type: "string", description: "Optional description for a newly created workout" },
+      },
+      required: ["movementName", "movementId", "durationSeconds"],
     },
   },
   {
@@ -551,6 +582,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "get_track_events":
         result = await getTrackEvents(args);
+        break;
+      case "create_for_distance_workout":
+        result = await createForDistanceWorkout(args);
         break;
       case "get_tracks":
         result = await getTracks(args);
