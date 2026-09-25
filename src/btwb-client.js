@@ -818,14 +818,32 @@ export async function getWeighIns({ days } = {}) {
 export async function getMovementHistory({ memberId, movementId, movementSlug, days = 365 }) {
   memberId ??= await getMemberId();
   const seconds = Math.round(days * 86400);
-  const res = await fetch(
-    `${BASE_URL}/members/${memberId}/movements/${movementId}-${movementSlug}/vmax?d=${seconds}`,
-    { headers: { Cookie: await getCookie() } }
-  );
+  const path = `/members/${memberId}/movements/${movementId}-${movementSlug}/vmax?d=${seconds}`;
+
+  let res = await fetch(`${BASE_URL}${path}`, { headers: { Cookie: await getCookie() } });
+  let body = await res.text();
+
+  // An expired session redirects to the sign-in page, so the body comes back
+  // as HTML instead of JSON - same fallback fetchPageHtml() uses.
+  if (/^\s*</.test(body)) {
+    await refreshSessionCookie();
+    res = await fetch(`${BASE_URL}${path}`, { headers: { Cookie: await getCookie() } });
+    body = await res.text();
+  }
+
   if (!res.ok) {
     throw new Error(`BTWB movement history fetch failed: HTTP ${res.status}`);
   }
-  return res.json();
+
+  // BTWB answers with a 200 and an *empty body* when the member has no sets
+  // for this movement in the window - not "{}" or "[]" - so parsing
+  // unconditionally threw "Unexpected end of JSON input" for the common
+  // "nothing logged in this window" case.
+  if (!body.trim()) {
+    return { series: [], units: null };
+  }
+
+  return JSON.parse(body);
 }
 
 // Rails' standard destroy action - the same request its own UJS delete links
