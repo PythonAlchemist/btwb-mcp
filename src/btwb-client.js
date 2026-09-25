@@ -1022,6 +1022,120 @@ export async function createAmrapWorkout({ minutes, movements, name, description
   });
 }
 
+// Loads a workout's "Plan" form - the page behind the Plan button on any
+// workout - and returns what's needed to post it back: the form's own CSRF
+// token, the pre-generated group name, and the tracks the member can schedule
+// onto.
+async function loadPlanForm(workoutId) {
+  const html = await fetchPageHtml(`/plan/track_events/workouts/${workoutId}/new`);
+
+  // The form is server-rendered but its authenticity_token input is NOT -
+  // Rails/Turbo injects that client-side from the csrf-token meta tag, which
+  // is what getCsrfToken() reads. Same for track_event[task_id], which is just
+  // the workout id from the URL.
+  const csrfToken = await getCsrfToken();
+
+  // BTWB pre-fills a random group name per form; workouts sharing one land in
+  // the same session block on the calendar. Note value= precedes name= here.
+  const groupName =
+    html.match(/<input[^>]*value="([^"]+)"[^>]*name="track_event\[group_name\]"/)?.[1] || "";
+
+  const selectHtml = html.match(
+    /<select[^>]*name="track_event\[track_id\]"[\s\S]*?<\/select>/
+  )?.[0];
+  if (!selectHtml) {
+    throw new Error(
+      `Could not read the Plan form for workout ${workoutId} - check the id, ` +
+        "or BTWB's planner may have changed."
+    );
+  }
+  const tracks = [...selectHtml.matchAll(/<option value="(\d+)"[^>]*>\s*([^<]+?)\s*<\/option>/g)]
+    .map(([, id, label]) => ({ trackId: Number(id), name: decodeHtmlEntities(label) }));
+
+  return { csrfToken, groupName, tracks };
+}
+
+// The tracks this member can schedule onto, with their ids. Read from any
+// workout's Plan form, since that's where BTWB exposes the picker.
+export async function getTracks({ workoutId = 2 } = {}) {
+  const { tracks } = await loadPlanForm(workoutId);
+  return { tracks };
+}
+
+// Schedules an existing workout onto a track for a date - the same request
+// BTWB's "Plan Workout" button sends. This is what puts a workout on the
+// calendar; create_sets_workout and friends only define workouts, they don't
+// schedule them.
+//
+// Pass the same groupName for several workouts on one date to group them into
+// a single session block; omit it and each gets BTWB's own random group.
+export async function scheduleWorkout({ workoutId, trackId, date, title = "", groupName }) {
+  const form = await loadPlanForm(workoutId);
+
+  if (!trackId) {
+    const names = form.tracks.map((t) => `${t.trackId} (${t.name})`).join(", ");
+    throw new Error(`schedule_workout needs a trackId. Available: ${names || "none"}`);
+  }
+
+  const body = new URLSearchParams({
+    authenticity_token: form.csrfToken,
+    "track_event[translations][content_locale]": "en-US",
+    "track_event[task_type]": "Workout",
+    "track_event[task_id]": String(workoutId),
+    "track_event[track_id]": String(trackId),
+    "track_event[event_date]": date,
+    "track_event[title]": title,
+    "track_event[group_name]": groupName || form.groupName,
+  });
+
+  const res = await fetch(`${BASE_URL}/plan/track_events/workouts`, {
+    method: "POST",
+    headers: {
+      Cookie: cachedCookie,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-CSRF-Token": form.csrfToken,
+    },
+    body,
+    redirect: "manual",
+  });
+
+  if (![302, 303].includes(res.status)) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`BTWB schedule_workout failed: HTTP ${res.status}. ${text.slice(0, 300)}`);
+  }
+
+  const location = res.headers.get("location") || "";
+  const trackEventId = location.match(/\/track_events\/workouts\/(\d+)/)?.[1];
+  return {
+    success: true,
+    trackEventId: trackEventId ? Number(trackEventId) : null,
+    workoutId,
+    trackId,
+    date,
+    groupName: groupName || form.groupName,
+    redirectedTo: location,
+  };
+}
+
+// Removes a scheduled workout from the calendar. Unlike workout definitions -
+// which live in BTWB's shared library and can't be deleted - a track event
+// belongs to the member, so this is the undo for schedule_workout.
+export async function deleteTrackEvent(trackEventId) {
+  const csrfToken = await getCsrfToken();
+  const res = await fetch(`${BASE_URL}/plan/track_events/${trackEventId}`, {
+    method: "DELETE",
+    headers: { Cookie: cachedCookie, "X-CSRF-Token": csrfToken, Accept: "text/html" },
+    redirect: "manual",
+  });
+  if (![200, 204, 302, 303].includes(res.status)) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `BTWB delete_track_event failed: HTTP ${res.status}. ${text.slice(0, 300)}`
+    );
+  }
+  return { success: true, trackEventId };
+}
+
 // Rails' standard destroy action - the same request its own UJS delete links
 // (data-method="delete") trigger, just issued directly as a real HTTP DELETE
 // instead of simulating the link click.

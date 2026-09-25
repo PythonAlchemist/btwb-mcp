@@ -17,6 +17,9 @@ import {
   getMovementHistory,
   createSetsWorkout,
   createAmrapWorkout,
+  getTracks,
+  scheduleWorkout,
+  deleteTrackEvent,
   getMemberId,
   getWorkoutSession,
   deleteWorkoutSession,
@@ -238,6 +241,52 @@ const TOOLS = [
         },
       },
       required: ["date"],
+    },
+  },
+  {
+    name: "get_tracks",
+    description:
+      "List the programming tracks this member can schedule onto, with their trackIds - " +
+      "schedule_workout needs one. Read from BTWB's Plan form.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "schedule_workout",
+    description:
+      "Put an existing workout on the calendar for a date - the same thing BTWB's " +
+      "'Plan Workout' button does. This is what makes a workout show up in the app; " +
+      "create_sets_workout and create_amrap_workout only DEFINE workouts in the " +
+      "library, they don't schedule them. Use get_tracks for the trackId and " +
+      "search/create tools for the workoutId. Reversible with delete_track_event.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workoutId: { type: "number", description: "Numeric workout ID to schedule" },
+        trackId: { type: "number", description: "Track to schedule onto (from get_tracks)" },
+        date: { type: "string", description: "Date to schedule for, format YYYY-MM-DD" },
+        title: { type: "string", description: "Optional custom title shown on the calendar" },
+        groupName: {
+          type: "string",
+          description:
+            "Optional. Pass the same value for several workouts on one date to group " +
+            "them into a single session block; omit it and BTWB assigns its own.",
+        },
+      },
+      required: ["workoutId", "trackId", "date"],
+    },
+  },
+  {
+    name: "delete_track_event",
+    description:
+      "Remove a scheduled workout from the calendar - the undo for schedule_workout. " +
+      "Note this deletes the CALENDAR ENTRY, not the workout definition: workouts live " +
+      "in BTWB's shared library and cannot be deleted at all.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        trackEventId: { type: "number", description: "Track event ID (returned by schedule_workout)" },
+      },
+      required: ["trackEventId"],
     },
   },
   {
@@ -501,6 +550,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "get_track_events":
         result = await getTrackEvents(args);
+        break;
+      case "get_tracks":
+        result = await getTracks(args);
+        break;
+      case "schedule_workout":
+        result = await scheduleWorkout(args);
+        break;
+      case "delete_track_event":
+        result = await deleteTrackEvent(args.trackEventId);
         break;
       case "create_sets_workout":
         result = await createSetsWorkout(args);
