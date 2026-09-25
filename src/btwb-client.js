@@ -937,60 +937,96 @@ async function saveWorkoutDefinition({ toolName, prescription, contents, name, d
 }
 
 // Defines a single-movement "Sets" workout (e.g. "Bench Press : 3-3-3",
-// "Ring Dips : 3x Max Rep"). BTWB's builder has two separate branches for this
-// - #single/weight for loaded movements and #single/reps for bodyweight
-// gymnastics - and they post different prescriptions. Pass bodyweight: true for
-// a gymnastics movement (search_movement reports those with posting_trait
-// "reps" / modality "gymnastics").
+// "Ring Dips : 3x Max Rep", "Bench Press : 5-5-5 at 65/75/85% 1RM").
 //
-// All four combinations were captured from the real wizard; none of it is
-// guessable from the others, so the table is written out rather than derived:
+// BTWB's builder has two branches for this - #single/weight for loaded
+// movements and #single/reps for bodyweight gymnastics - and they post
+// different prescriptions. Pass bodyweight: true for a gymnastics movement
+// (search_movement reports those with modality "gymnastics").
 //
-//   branch      reps   type                 scoring      movement reps  inputs
+// All combinations below were captured from the real wizard; none is
+// predictable from the others, so the table is written out rather than derived:
+//
+//   branch      reps   type                 scoring      movement carries
 //   ---------------------------------------------------------------------------
-//   weight      fixed  weightlifting/sets   totalWeight  {value,unit}   [weight]
-//   weight      max    weightlifting/sets   totalWeight  -              [reps,weight]
-//   gymnastics  fixed  gymnastics/sets      completed    {value,unit}   -
-//   gymnastics  max    gymnastics/sets      totalReps    -              [reps]
+//   weight      fixed  weightlifting/sets   totalWeight  reps, inputs[weight]
+//   weight      max    weightlifting/sets   totalWeight  inputs[reps,weight]
+//   weight      %1RM   weightlifting/sets   completed    reps, weight, inputs[weight]
+//   gymnastics  fixed  gymnastics/sets      completed    reps
+//   gymnastics  max    gymnastics/sets      totalReps    inputs[reps]
 //
-// `contents` repeats the movement once PER SET rather than carrying a set
-// count, which is how the real form posts it.
+// Note scoring flips to "completed" once the load is prescribed as a
+// percentage - there's nothing left to score when the weight is dictated.
+//
+// `contents` repeats once PER SET, so a varying wave (5/3/1, or 65/75/85%)
+// needs no special support: pass `setScheme` as one entry per set and each
+// carries its own reps and percentage.
 export async function createSetsWorkout({
   movementName,
   movementId,
   sets,
   reps,
   maxReps = false,
+  percent,
+  setScheme,
   bodyweight = false,
   weightPerSet = "heaviest",
   name,
   description,
 }) {
-  if (!maxReps && reps == null) {
-    throw new Error("create_sets_workout needs either reps or maxReps: true.");
+  // One entry per set: either the explicit scheme, or `sets` copies of a
+  // uniform one.
+  const scheme = setScheme
+    ? setScheme
+    : Array.from({ length: sets || 0 }, () => ({ reps, maxReps, percent }));
+
+  if (!scheme.length) {
+    throw new Error("create_sets_workout needs either sets (with reps or maxReps) or setScheme.");
+  }
+  for (const set of scheme) {
+    if (!set.maxReps && set.reps == null) {
+      throw new Error("Every set needs reps, or maxReps: true.");
+    }
+    if (set.percent != null && (set.percent <= 0 || set.percent > 200)) {
+      throw new Error(`percent looks wrong: ${set.percent} (expected a %1RM like 75).`);
+    }
+  }
+
+  const usesPercent = scheme.some((set) => set.percent != null);
+  if (usesPercent && bodyweight) {
+    throw new Error("percent applies to loaded movements; a bodyweight movement has no %1RM.");
   }
 
   const prescription = bodyweight
-    ? { type: "gymnastics/sets", scoring: maxReps ? "totalReps" : "completed" }
-    : { type: "weightlifting/sets", weightPerSet, scoring: "totalWeight" };
+    ? {
+        type: "gymnastics/sets",
+        scoring: scheme.every((set) => set.maxReps) ? "totalReps" : "completed",
+      }
+    : {
+        type: "weightlifting/sets",
+        weightPerSet: usesPercent ? "onerepmax" : weightPerSet,
+        scoring: usesPercent ? "completed" : "totalWeight",
+      };
 
-  // What the logger collects afterwards: reps only when they aren't already
-  // prescribed, weight only when the movement is loaded. A prescribed-reps
-  // gymnastics set collects nothing, so the key is left off entirely.
-  const inputs = [...(maxReps ? ["reps"] : []), ...(bodyweight ? [] : ["weight"])];
-
-  const movement = {
-    type: "movement",
-    movementName,
-    movementId,
-    ...(maxReps ? {} : { reps: { value: reps, unit: "reps" } }),
-    ...(inputs.length ? { inputs } : {}),
-  };
+  const contents = scheme.map((set) => {
+    // inputs are what the logger collects afterwards: reps only when they
+    // aren't prescribed, weight only when the movement is loaded. A
+    // prescribed-reps gymnastics set collects nothing, so the key is dropped.
+    const inputs = [...(set.maxReps ? ["reps"] : []), ...(bodyweight ? [] : ["weight"])];
+    return {
+      type: "movement",
+      movementName,
+      movementId,
+      ...(set.maxReps ? {} : { reps: { value: set.reps, unit: "reps" } }),
+      ...(set.percent != null ? { weight: { value: set.percent, unit: "onerepmax" } } : {}),
+      ...(inputs.length ? { inputs } : {}),
+    };
+  });
 
   return saveWorkoutDefinition({
     toolName: "create_sets_workout",
     prescription,
-    contents: Array.from({ length: sets }, () => movement),
+    contents,
     name,
     description,
   });

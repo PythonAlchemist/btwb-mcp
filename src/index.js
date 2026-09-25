@@ -386,6 +386,27 @@ const TOOLS = [
             "getting this wrong produces a workout that matches nothing and silently " +
             "creates a malformed duplicate.",
         },
+        percent: {
+          type: "number",
+          description:
+            "Prescribe the load as a % of 1RM (e.g. 70) instead of 'heaviest'. Applies " +
+            "to every set; use setScheme for a wave where the percentage changes.",
+        },
+        setScheme: {
+          type: "array",
+          description:
+            "One entry per set, for waves where reps and/or load vary - e.g. Wendler " +
+            "5/3/1 is [{reps:5,percent:75},{reps:3,percent:85},{reps:1,percent:95}]. " +
+            "Overrides sets/reps/percent when given.",
+          items: {
+            type: "object",
+            properties: {
+              reps: { type: "number", description: "Reps for this set" },
+              maxReps: { type: "boolean", description: "true for a max-effort set" },
+              percent: { type: "number", description: "Load as % of 1RM for this set" },
+            },
+          },
+        },
         weightPerSet: {
           type: "string",
           enum: ["heaviest", "same", "onerepmax", "xbodyweight", "assign"],
@@ -395,7 +416,7 @@ const TOOLS = [
         name: { type: "string", description: "Name to create the workout under, only used when nothing in BTWB's library matches. Without it a no-match returns needsName instead of creating anything" },
         description: { type: "string", description: "Optional description for a newly created workout; defaults to the name" },
       },
-      required: ["movementName", "movementId", "sets"],
+      required: ["movementName", "movementId"],
     },
   },
   {
