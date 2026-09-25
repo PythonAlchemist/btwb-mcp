@@ -1030,10 +1030,17 @@ async function loadPlanForm(workoutId) {
   const html = await fetchPageHtml(`/plan/track_events/workouts/${workoutId}/new`);
 
   // The form is server-rendered but its authenticity_token input is NOT -
-  // Rails/Turbo injects that client-side from the csrf-token meta tag, which
-  // is what getCsrfToken() reads. Same for track_event[task_id], which is just
-  // the workout id from the URL.
-  const csrfToken = await getCsrfToken();
+  // Rails/Turbo injects that client-side from the csrf-token meta tag ON THIS
+  // PAGE. Take it from here rather than from getCsrfToken(), which reads
+  // /whiteboard: that's a second request which can rotate the session cookie
+  // out from under the token it just minted. Same reasoning for
+  // track_event[task_id] - it's the workout id from the URL, not the markup.
+  const csrfToken = html.match(/<meta name="csrf-token" content="([^"]+)"/)?.[1];
+  if (!csrfToken) {
+    throw new Error(
+      `Could not read a CSRF token from the Plan form for workout ${workoutId}.`
+    );
+  }
 
   // BTWB pre-fills a random group name per form; workouts sharing one land in
   // the same session block on the calendar. Note value= precedes name= here.
@@ -1075,6 +1082,17 @@ export async function scheduleWorkout({ workoutId, trackId, date, title = "", gr
   if (!trackId) {
     const names = form.tracks.map((t) => `${t.trackId} (${t.name})`).join(", ");
     throw new Error(`schedule_workout needs a trackId. Available: ${names || "none"}`);
+  }
+
+  // BTWB validates group_name as alphanumeric - anything else (a hyphen is
+  // enough) comes back as a 422 with the form re-rendered, which looks exactly
+  // like a CSRF rejection and is easy to misdiagnose as one. Its own values are
+  // 12-char alphanumeric tokens.
+  if (groupName && !/^[A-Za-z0-9]+$/.test(groupName)) {
+    throw new Error(
+      `schedule_workout: groupName must be alphanumeric (got "${groupName}"). ` +
+        "BTWB rejects anything else with a 422."
+    );
   }
 
   const body = new URLSearchParams({

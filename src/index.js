@@ -269,7 +269,8 @@ const TOOLS = [
           type: "string",
           description:
             "Optional. Pass the same value for several workouts on one date to group " +
-            "them into a single session block; omit it and BTWB assigns its own.",
+            "them into a single session block; omit it and BTWB assigns its own. " +
+            "MUST be alphanumeric - BTWB rejects hyphens and anything else with a 422.",
         },
       },
       required: ["workoutId", "trackId", "date"],
